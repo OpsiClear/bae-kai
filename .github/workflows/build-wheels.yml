@@ -1,0 +1,268 @@
+name: Build Wheels
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches: [release]
+  pull_request:
+    branches: [release, main]
+  workflow_dispatch:
+    inputs:
+      skip_linux:
+        description: 'Skip Linux builds'
+        type: boolean
+        default: false
+      skip_windows:
+        description: 'Skip Windows builds'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  USE_CUDSS: '0'  # Disable CUDSS for CI (not available)
+  # Set CUDA architectures to build for (no GPU in CI, so must specify explicitly)
+  # 7.0=V100, 7.5=T4, 8.0=A100, 8.6=RTX30xx, 8.9=RTX40xx, 9.0=H100
+  TORCH_CUDA_ARCH_LIST: "7.0;7.5;8.0;8.6;8.9;9.0"
+
+jobs:
+  # ============================================
+  # Linux builds using official PyTorch images
+  # ============================================
+  build-linux:
+    if: ${{ !inputs.skip_linux }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CUDA 12.4 builds (PyTorch 2.5.x compatibility)
+          - cuda: '12.4'
+            torch: '2.5'
+            image: 'pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel'
+          # CUDA 12.6 builds (PyTorch 2.6+ compatibility)
+          - cuda: '12.6'
+            torch: '2.6'
+            image: 'pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel'
+
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          # Clean up unnecessary files to free space
+          rm -rf /opt/conda/pkgs/* 2>/dev/null || true
+          apt-get clean || true
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git build-essential
+          # Use existing PyTorch from container, just add build tools
+          pip install --no-cache-dir setuptools wheel numpy scipy
+
+      - name: Show environment info
+        run: |
+          echo "=== Python ==="
+          python --version
+          echo "=== PyTorch ==="
+          python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
+          echo "=== NVCC ==="
+          nvcc --version || echo "NVCC not in PATH"
+          echo "=== Disk space ==="
+          df -h
+
+      - name: Build wheel
+        run: |
+          # Build without isolation to use container's PyTorch
+          pip wheel . --no-deps --no-build-isolation -w dist/
+
+      - name: Rename wheel with CUDA tag
+        run: |
+          cd dist
+          for f in *.whl; do
+            newname=$(echo "$f" | sed "s/\(bae-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
+            mv "$f" "$newname"
+          done
+          ls -la
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-cu${{ matrix.cuda }}
+          path: dist/*.whl
+
+  # ============================================
+  # Windows builds
+  # ============================================
+  build-windows:
+    if: ${{ !inputs.skip_windows }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: '12.4'
+            cuda_version: '12.4.0'
+            torch_index: 'https://download.pytorch.org/whl/cu124'
+          - cuda: '12.6'
+            cuda_version: '12.6.3'
+            torch_index: 'https://download.pytorch.org/whl/cu126'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.30
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "cusparse", "cusparse_dev", "cusolver", "cusolver_dev", "cufft", "cufft_dev", "thrust", "visual_studio_integration"]'
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set CUDA environment variables
+        run: |
+          # cuda-toolkit action sets CUDA_PATH, but PyTorch expects CUDA_HOME
+          echo "CUDA_HOME=$env:CUDA_PATH" >> $env:GITHUB_ENV
+          echo "CUDA_PATH=$env:CUDA_PATH"
+          echo "Setting CUDA_HOME to $env:CUDA_PATH"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install torch torchvision --index-url ${{ matrix.torch_index }}
+          python -m pip install numpy scipy
+
+      - name: Show environment info
+        run: |
+          echo "=== Python ==="
+          python --version
+          echo "=== PyTorch ==="
+          python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
+          echo "=== NVCC ==="
+          nvcc --version
+          echo "=== CUDA_PATH ==="
+          echo $env:CUDA_PATH
+          echo "=== CUDA_HOME ==="
+          echo $env:CUDA_HOME
+
+      - name: Build wheel
+        run: |
+          $env:DISTUTILS_USE_SDK = "1"
+          pip wheel . --no-deps --no-build-isolation -w dist/
+        env:
+          DISTUTILS_USE_SDK: '1'
+
+      - name: Rename wheel with CUDA tag
+        shell: bash
+        run: |
+          cd dist
+          for f in *.whl; do
+            newname=$(echo "$f" | sed "s/\(bae-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
+            mv "$f" "$newname"
+          done
+          ls -la
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-windows-cu${{ matrix.cuda }}
+          path: dist/*.whl
+
+  # ============================================
+  # Collect and verify wheels
+  # ============================================
+  collect-wheels:
+    needs: [build-linux, build-windows]
+    if: always() && (needs.build-linux.result == 'success' || needs.build-windows.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: wheels
+          pattern: wheel-*
+          merge-multiple: true
+
+      - name: List all wheels
+        run: |
+          echo "=== Built Wheels ==="
+          ls -lh wheels/
+          echo ""
+          echo "=== Wheel Names ==="
+          for f in wheels/*.whl; do
+            echo "$(basename $f)"
+          done
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bae-wheels-all
+          path: wheels/*.whl
+          retention-days: 30
+
+  # ============================================
+  # Create GitHub Release
+  # ============================================
+  release:
+    needs: collect-wheels
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: bae-wheels-all
+          path: dist/
+
+      - name: Generate release notes
+        run: |
+          echo "## Wheels" >> notes.md
+          echo "" >> notes.md
+          echo "| Platform | CUDA | File |" >> notes.md
+          echo "|----------|------|------|" >> notes.md
+          for f in dist/*.whl; do
+            name=$(basename $f)
+            if [[ $name == *"linux"* ]]; then
+              platform="Linux"
+            elif [[ $name == *"win"* ]]; then
+              platform="Windows"
+            else
+              platform="Unknown"
+            fi
+            cuda=$(echo $name | grep -oP 'cu\d+\.\d+' || echo "unknown")
+            echo "| $platform | $cuda | \`$name\` |" >> notes.md
+          done
+          echo "" >> notes.md
+          echo "## Installation" >> notes.md
+          echo "" >> notes.md
+          echo '```bash' >> notes.md
+          echo "pip install <wheel_file>.whl" >> notes.md
+          echo '```' >> notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.whl
+          body_path: notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}

@@ -1,0 +1,43 @@
+This project contains code under multiple licenses:
+
+================================================================================
+ORIGINAL CODE - Apache License 2.0
+================================================================================
+
+The original BAE (Bundle Adjustment in the Eager-mode) code is licensed under
+the Apache License 2.0. This includes all code from the original repository
+at https://github.com/zitongzhan/bae
+
+See LICENSE-APACHE for the full Apache 2.0 license text.
+
+Copyright 2025 Zitong Zhan, Huan Xu, Zihang Fang, Xinpeng Wei, Yaoyu Hu, Chen Wang
+
+================================================================================
+ADDED CODE - GNU Affero General Public License v3.0 (AGPL-3.0)
+================================================================================
+
+The following additions and modifications are licensed under AGPL-3.0:
+
+- Windows build support (setup.py modifications for MSVC detection)
+- Windows DLL loading fixes (bae/__init__.py)
+- GitHub Actions wheel building workflow (.github/workflows/build-wheels.yml)
+- Triton-windows support (bae/sparse/py_ops.py modifications)
+- CUDA namespace collision fixes (sparse_op_cuda_kernel.cu modifications)
+- Project configuration modernization (pyproject.toml)
+- Documentation (CLAUDE.md)
+
+See LICENSE-AGPL for the full AGPL-3.0 license text.
+
+Copyright 2025 OpsiClear
+
+================================================================================
+COMBINED WORK
+================================================================================
+
+When using the combined work, you must comply with both licenses:
+- The Apache 2.0 license for the original code
+- The AGPL-3.0 license for the added code
+
+If you distribute the combined work, the AGPL-3.0 terms apply to the portions
+under AGPL-3.0, and you must make the complete source code available under
+the terms of the AGPL-3.0 for those portions.

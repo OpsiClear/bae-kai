@@ -1,0 +1,64 @@
+[project]
+name = "bae"
+version = "0.1.0"
+description = "PyTorch implementation of Bundle Adjustment in the Eager-mode"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0 AND AGPL-3.0-only" }
+authors = [
+    { name = "Zitong Zhan" }
+]
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision",
+    "warp-lang",
+    "scipy",
+    "torchdata==0.8.0",
+    "portalocker>=2.0.0",
+    "tqdm",
+    "matplotlib",
+    "bs4",
+    "pypose",
+    "triton-windows; sys_platform == 'win32'",
+    "triton; sys_platform != 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "notebook",
+]
+
+[build-system]
+requires = ["setuptools", "wheel", "torch", "numpy"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+exclude = [
+    "ba_example.py",
+    "setup.py",
+    "README.md",
+    "data",
+    "1dsfm_bal",
+    "bal_data",
+    "colmap_helpers",
+    "datapipes",
+    "examples",
+    "tests",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest",
+    "notebook",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+pypose = { git = "https://github.com/pypose/pypose.git", branch = "bae" }
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }

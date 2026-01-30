@@ -1,0 +1,17 @@
+build/*
+bae.egg-info/*
+*.so
+*.pyd
+*.pyc
+.venv/
+.msvc_bin/
+.claude/
+bal_data/*
+datapipes/bal_data/*
+.ipynb_checkpoints/*
+.idea/*
+dump_Ab/*
+tmp_debug/*
+task.md
+*.pickle
+*.png
