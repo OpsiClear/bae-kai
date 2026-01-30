@@ -204,11 +204,8 @@ jobs:
             cuda_version: '12.8.0'
             torch_index: 'https://download.pytorch.org/whl/cu128'
             arch_list: "7.5;8.0;8.6;8.9;9.0;12.0"
-          # CUDA 13.0 with full Blackwell support
-          - cuda: '13.0'
-            cuda_version: '13.0.0'
-            torch_index: 'https://download.pytorch.org/whl/cu130'
-            arch_list: "8.0;8.6;8.9;9.0;12.0"
+          # Note: Windows CUDA 13.0 disabled - toolkit installation issue on CI
+          # Use Linux CUDA 13.0 or Windows CUDA 12.8 for Blackwell support
 
     env:
       TORCH_CUDA_ARCH_LIST: ${{ matrix.arch_list }}
@@ -366,7 +363,7 @@ jobs:
           echo "| 12.4 | 2.5.x | V100, T4, A100, RTX30xx, RTX40xx, H100 |" >> notes.md
           echo "| 12.6 | 2.6.x | V100, T4, A100, RTX30xx, RTX40xx, H100 |" >> notes.md
           echo "| 12.8 | 2.9.x | T4, A100, RTX30xx, RTX40xx, H100, **Blackwell** |" >> notes.md
-          echo "| 13.0 | 2.9.x | A100, RTX30xx, RTX40xx, H100, **Blackwell** |" >> notes.md
+          echo "| 13.0 | 2.9.x | A100, RTX30xx, RTX40xx, H100, **Blackwell** (Linux only) |" >> notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
