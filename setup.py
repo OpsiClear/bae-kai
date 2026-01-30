@@ -352,7 +352,7 @@ if __name__ == '__main__':
     # (see https://github.com/pytorch/pytorch/pull/144707)
     # The workaround requires USE_CUDA to be defined to skip problematic code
     cuda_extra_compile_args = {
-        'cxx': ['/DUSE_CUDA'],
+        'cxx': ['/DUSE_CUDA'] if sys.platform == 'win32' else ['-DUSE_CUDA'],
         'nvcc': [
             '-DUSE_CUDA',  # Required to trigger PyTorch's Windows+CUDA workaround
         ]
