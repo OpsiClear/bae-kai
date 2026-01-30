@@ -23,10 +23,6 @@ permissions:
 
 env:
   USE_CUDSS: '0'  # Disable CUDSS for CI (not available)
-  # Set CUDA architectures to build for (no GPU in CI, so must specify explicitly)
-  # 7.0=V100, 7.5=T4, 8.0=A100, 8.6=RTX30xx, 8.9=RTX40xx, 9.0=H100
-  # Note: sm_120 (Blackwell) requires CUDA 13.0+ which isn't available yet
-  TORCH_CUDA_ARCH_LIST: "7.0;7.5;8.0;8.6;8.9;9.0"
 
 jobs:
   # ============================================
@@ -43,13 +39,18 @@ jobs:
           - cuda: '12.4'
             torch: '2.5'
             image: 'pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel'
+            arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
           # CUDA 12.6 builds (PyTorch 2.6+ compatibility)
           - cuda: '12.6'
             torch: '2.6'
             image: 'pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel'
+            arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
 
     container:
       image: ${{ matrix.image }}
+
+    env:
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.arch_list }}
 
     steps:
       - name: Checkout
@@ -76,12 +77,93 @@ jobs:
           python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
           echo "=== NVCC ==="
           nvcc --version || echo "NVCC not in PATH"
+          echo "=== TORCH_CUDA_ARCH_LIST ==="
+          echo "$TORCH_CUDA_ARCH_LIST"
           echo "=== Disk space ==="
           df -h
 
       - name: Build wheel
         run: |
           # Build without isolation to use container's PyTorch
+          pip wheel . --no-deps --no-build-isolation -w dist/
+
+      - name: Rename wheel with CUDA tag
+        run: |
+          cd dist
+          for f in *.whl; do
+            newname=$(echo "$f" | sed "s/\(bae-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
+            mv "$f" "$newname"
+          done
+          ls -la
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-cu${{ matrix.cuda }}
+          path: dist/*.whl
+
+  # ============================================
+  # Linux builds for newer CUDA (12.8, 13.0)
+  # Uses NVIDIA CUDA images + pip install PyTorch
+  # ============================================
+  build-linux-new-cuda:
+    if: ${{ !inputs.skip_linux }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CUDA 12.8 builds (PyTorch 2.9.x) - includes sm_120 (Blackwell)
+          - cuda: '12.8'
+            cuda_full: '12.8.0'
+            torch_index: 'https://download.pytorch.org/whl/cu128'
+            # sm_120 requires CUDA 12.8+; drop older archs (sm50-60) per PyTorch 2.8+ changes
+            arch_list: "7.5;8.0;8.6;8.9;9.0;12.0"
+          # CUDA 13.0 builds (PyTorch 2.9.x) - full sm_120 support
+          - cuda: '13.0'
+            cuda_full: '13.0.0'
+            torch_index: 'https://download.pytorch.org/whl/cu130'
+            # Full Blackwell support; older Maxwell/Pascal/Volta dropped in CUDA 13
+            arch_list: "8.0;8.6;8.9;9.0;12.0"
+
+    container:
+      image: nvidia/cuda:${{ matrix.cuda_full }}-devel-ubuntu22.04
+
+    env:
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.arch_list }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python and build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 python3-pip python3-dev git build-essential
+          # Create python symlink if needed
+          ln -sf /usr/bin/python3 /usr/bin/python || true
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install PyTorch
+        run: |
+          python -m pip install --no-cache-dir torch torchvision --index-url ${{ matrix.torch_index }}
+          python -m pip install --no-cache-dir numpy scipy
+
+      - name: Show environment info
+        run: |
+          echo "=== Python ==="
+          python --version
+          echo "=== PyTorch ==="
+          python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
+          echo "=== NVCC ==="
+          nvcc --version
+          echo "=== TORCH_CUDA_ARCH_LIST ==="
+          echo "$TORCH_CUDA_ARCH_LIST"
+          echo "=== Disk space ==="
+          df -h
+
+      - name: Build wheel
+        run: |
           pip wheel . --no-deps --no-build-isolation -w dist/
 
       - name: Rename wheel with CUDA tag
@@ -112,9 +194,24 @@ jobs:
           - cuda: '12.4'
             cuda_version: '12.4.0'
             torch_index: 'https://download.pytorch.org/whl/cu124'
+            arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
           - cuda: '12.6'
             cuda_version: '12.6.3'
             torch_index: 'https://download.pytorch.org/whl/cu126'
+            arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
+          # CUDA 12.8 with sm_120 (Blackwell) support
+          - cuda: '12.8'
+            cuda_version: '12.8.0'
+            torch_index: 'https://download.pytorch.org/whl/cu128'
+            arch_list: "7.5;8.0;8.6;8.9;9.0;12.0"
+          # CUDA 13.0 with full Blackwell support
+          - cuda: '13.0'
+            cuda_version: '13.0.0'
+            torch_index: 'https://download.pytorch.org/whl/cu130'
+            arch_list: "8.0;8.6;8.9;9.0;12.0"
+
+    env:
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.arch_list }}
 
     steps:
       - name: Checkout
@@ -163,6 +260,8 @@ jobs:
           echo $env:CUDA_PATH
           echo "=== CUDA_HOME ==="
           echo $env:CUDA_HOME
+          echo "=== TORCH_CUDA_ARCH_LIST ==="
+          echo $env:TORCH_CUDA_ARCH_LIST
 
       - name: Build wheel
         run: |
@@ -191,8 +290,8 @@ jobs:
   # Collect and verify wheels
   # ============================================
   collect-wheels:
-    needs: [build-linux, build-windows]
-    if: always() && (needs.build-linux.result == 'success' || needs.build-windows.result == 'success')
+    needs: [build-linux, build-linux-new-cuda, build-windows]
+    if: always() && (needs.build-linux.result == 'success' || needs.build-linux-new-cuda.result == 'success' || needs.build-windows.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Download all wheels
@@ -259,6 +358,15 @@ jobs:
           echo '```bash' >> notes.md
           echo "pip install <wheel_file>.whl" >> notes.md
           echo '```' >> notes.md
+          echo "" >> notes.md
+          echo "## CUDA Compatibility" >> notes.md
+          echo "" >> notes.md
+          echo "| CUDA | PyTorch | GPU Architectures |" >> notes.md
+          echo "|------|---------|-------------------|" >> notes.md
+          echo "| 12.4 | 2.5.x | V100, T4, A100, RTX30xx, RTX40xx, H100 |" >> notes.md
+          echo "| 12.6 | 2.6.x | V100, T4, A100, RTX30xx, RTX40xx, H100 |" >> notes.md
+          echo "| 12.8 | 2.9.x | T4, A100, RTX30xx, RTX40xx, H100, **Blackwell** |" >> notes.md
+          echo "| 13.0 | 2.9.x | A100, RTX30xx, RTX40xx, H100, **Blackwell** |" >> notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
