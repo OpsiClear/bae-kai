@@ -24,8 +24,9 @@ permissions:
 env:
   USE_CUDSS: '0'  # Disable CUDSS for CI (not available)
   # Set CUDA architectures to build for (no GPU in CI, so must specify explicitly)
-  # 7.0=V100, 7.5=T4, 8.0=A100, 8.6=RTX30xx, 8.9=RTX40xx, 9.0=H100, 12.0=Blackwell
-  TORCH_CUDA_ARCH_LIST: "7.0;7.5;8.0;8.6;8.9;9.0;12.0"
+  # 7.0=V100, 7.5=T4, 8.0=A100, 8.6=RTX30xx, 8.9=RTX40xx, 9.0=H100
+  # Note: sm_120 (Blackwell) requires CUDA 13.0+ which isn't available yet
+  TORCH_CUDA_ARCH_LIST: "7.0;7.5;8.0;8.6;8.9;9.0"
 
 jobs:
   # ============================================
