@@ -1,0 +1,486 @@
+name: Build Wheels
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches: [release]
+  pull_request:
+    branches: [release, main]
+  workflow_dispatch:
+    inputs:
+      skip_linux:
+        description: 'Skip Linux builds'
+        type: boolean
+        default: false
+      skip_windows:
+        description: 'Skip Windows builds'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  # Enable CUDSS and DLL bundling for self-contained wheels
+  USE_CUDSS: '1'
+  BUNDLE_DLLS: '1'
+  CUDSS_VERSION: '0.7.1.4'
+
+jobs:
+  # ============================================
+  # Linux builds using official PyTorch images
+  # ============================================
+  build-linux:
+    if: ${{ !inputs.skip_linux }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CUDA 12.4 builds (PyTorch 2.5.x compatibility)
+          - cuda: '12.4'
+            torch: '2.5'
+            image: 'pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel'
+            arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
+          # CUDA 12.6 builds (PyTorch 2.6+ compatibility)
+          - cuda: '12.6'
+            torch: '2.6'
+            image: 'pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel'
+            arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
+
+    container:
+      image: ${{ matrix.image }}
+
+    env:
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.arch_list }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          echo "=== Before cleanup ==="
+          df -h
+          # Clean conda packages and cache
+          rm -rf /opt/conda/pkgs/* 2>/dev/null || true
+          conda clean -afy 2>/dev/null || true
+          # Remove CUDA samples and documentation
+          rm -rf /usr/local/cuda/samples /usr/local/cuda/doc 2>/dev/null || true
+          # Remove CUDA nsight tools (very large)
+          rm -rf /usr/local/cuda/nsight* /usr/local/cuda/NsightCompute* /usr/local/cuda/NsightSystems* 2>/dev/null || true
+          rm -rf /usr/local/cuda/libnvvp /usr/local/cuda/nsightee_plugins 2>/dev/null || true
+          # Remove unused CUDA libraries
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnvrtc* 2>/dev/null || true
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcurand* 2>/dev/null || true
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcufft* 2>/dev/null || true
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnpp* 2>/dev/null || true
+          # Clean apt cache
+          apt-get clean || true
+          rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+          echo "=== After cleanup ==="
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git build-essential wget xz-utils
+          # Use existing PyTorch from container, just add build tools
+          pip install --no-cache-dir setuptools wheel numpy scipy
+
+      - name: Download and install CUDSS
+        run: |
+          mkdir -p /opt/cudss
+          cd /tmp
+          wget -q https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-x86_64/libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz
+          tar -xf libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz
+          cp -r libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive/* /opt/cudss/
+          # Clean up archive to save disk space
+          rm -rf /tmp/libcudss-* 2>/dev/null || true
+          echo "CUDSS_DIR=/opt/cudss" >> $GITHUB_ENV
+          ls -la /opt/cudss/lib/ || true
+          df -h
+
+      - name: Show environment info
+        run: |
+          echo "=== Python ==="
+          python --version
+          echo "=== PyTorch ==="
+          python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
+          echo "=== NVCC ==="
+          nvcc --version || echo "NVCC not in PATH"
+          echo "=== CUDSS ==="
+          ls -la $CUDSS_DIR/lib/ 2>/dev/null || echo "CUDSS not found"
+          echo "=== TORCH_CUDA_ARCH_LIST ==="
+          echo "$TORCH_CUDA_ARCH_LIST"
+          echo "=== Disk space ==="
+          df -h
+
+      - name: Build wheel
+        run: |
+          echo "=== Disk before build ==="
+          df -h
+          # Build without isolation to use container's PyTorch
+          pip wheel . --no-deps --no-build-isolation -w dist/
+          echo "=== Disk after build ==="
+          df -h
+          # Clean build artifacts
+          rm -rf build/ *.egg-info/ 2>/dev/null || true
+
+      - name: Rename wheel with CUDA tag
+        run: |
+          cd dist
+          for f in *.whl; do
+            newname=$(echo "$f" | sed "s/\(bae-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
+            mv "$f" "$newname"
+          done
+          ls -la
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-cu${{ matrix.cuda }}
+          path: dist/*.whl
+
+  # ============================================
+  # Linux builds for newer CUDA (12.8, 13.0)
+  # Uses NVIDIA CUDA images + pip install PyTorch
+  # ============================================
+  build-linux-new-cuda:
+    if: ${{ !inputs.skip_linux }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CUDA 12.8 builds (PyTorch 2.9.x) - includes sm_120 (Blackwell)
+          - cuda: '12.8'
+            cuda_full: '12.8.0'
+            torch_index: 'https://download.pytorch.org/whl/cu128'
+            # sm_120 requires CUDA 12.8+; drop older archs (sm50-60) per PyTorch 2.8+ changes
+            arch_list: "7.5;8.0;8.6;8.9;9.0;12.0"
+          # CUDA 13.0 builds (PyTorch 2.9.x) - full sm_120 support
+          - cuda: '13.0'
+            cuda_full: '13.0.0'
+            torch_index: 'https://download.pytorch.org/whl/cu130'
+            # Full Blackwell support; older Maxwell/Pascal/Volta dropped in CUDA 13
+            arch_list: "8.0;8.6;8.9;9.0;12.0"
+
+    container:
+      image: nvidia/cuda:${{ matrix.cuda_full }}-devel-ubuntu22.04
+
+    env:
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.arch_list }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          echo "=== Before cleanup ==="
+          df -h
+          # Remove CUDA samples and documentation (in container)
+          rm -rf /usr/local/cuda/samples /usr/local/cuda/doc 2>/dev/null || true
+          # Remove CUDA nsight tools (very large)
+          rm -rf /usr/local/cuda/nsight* /usr/local/cuda/NsightCompute* /usr/local/cuda/NsightSystems* 2>/dev/null || true
+          rm -rf /usr/local/cuda/libnvvp /usr/local/cuda/nsightee_plugins 2>/dev/null || true
+          # Remove unnecessary CUDA libraries we don't use
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnvrtc* 2>/dev/null || true
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcurand* 2>/dev/null || true
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcufft* 2>/dev/null || true
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnpp* 2>/dev/null || true
+          # Clean apt cache
+          apt-get clean || true
+          rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+          # Clean tmp
+          rm -rf /tmp/* 2>/dev/null || true
+          echo "=== After cleanup ==="
+          df -h
+
+      - name: Install Python and build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 python3-pip python3-dev git build-essential wget xz-utils
+          # Create python symlink if needed
+          ln -sf /usr/bin/python3 /usr/bin/python || true
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Download and install CUDSS
+        run: |
+          mkdir -p /opt/cudss
+          cd /tmp
+          wget -q https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-x86_64/libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz
+          tar -xf libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz
+          cp -r libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive/* /opt/cudss/
+          # Clean up archive to save disk space
+          rm -rf /tmp/libcudss-* 2>/dev/null || true
+          echo "CUDSS_DIR=/opt/cudss" >> $GITHUB_ENV
+          ls -la /opt/cudss/lib/ || true
+          df -h
+
+      - name: Install PyTorch
+        run: |
+          python -m pip install --no-cache-dir torch torchvision --index-url ${{ matrix.torch_index }}
+          python -m pip install --no-cache-dir numpy scipy
+          # Clean pip cache to save disk space
+          pip cache purge 2>/dev/null || true
+          df -h
+
+      - name: Show environment info
+        run: |
+          echo "=== Python ==="
+          python --version
+          echo "=== PyTorch ==="
+          python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
+          echo "=== NVCC ==="
+          nvcc --version
+          echo "=== CUDSS ==="
+          ls -la $CUDSS_DIR/lib/ 2>/dev/null || echo "CUDSS not found"
+          echo "=== TORCH_CUDA_ARCH_LIST ==="
+          echo "$TORCH_CUDA_ARCH_LIST"
+          echo "=== Disk space ==="
+          df -h
+
+      - name: Build wheel
+        run: |
+          echo "=== Disk before build ==="
+          df -h
+          pip wheel . --no-deps --no-build-isolation -w dist/
+          echo "=== Disk after build ==="
+          df -h
+          # Clean build artifacts to free space
+          rm -rf build/ *.egg-info/ 2>/dev/null || true
+
+      - name: Rename wheel with CUDA tag
+        run: |
+          cd dist
+          for f in *.whl; do
+            newname=$(echo "$f" | sed "s/\(bae-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
+            mv "$f" "$newname"
+          done
+          ls -la
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-cu${{ matrix.cuda }}
+          path: dist/*.whl
+
+  # ============================================
+  # Windows builds
+  # ============================================
+  build-windows:
+    if: ${{ !inputs.skip_windows }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: '12.4'
+            cuda_version: '12.4.0'
+            torch_index: 'https://download.pytorch.org/whl/cu124'
+            arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
+          - cuda: '12.6'
+            cuda_version: '12.6.3'
+            torch_index: 'https://download.pytorch.org/whl/cu126'
+            arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
+          # CUDA 12.8 with sm_120 (Blackwell) support
+          - cuda: '12.8'
+            cuda_version: '12.8.0'
+            torch_index: 'https://download.pytorch.org/whl/cu128'
+            arch_list: "7.5;8.0;8.6;8.9;9.0;12.0"
+          # Note: Windows CUDA 13.0 disabled - toolkit installation issue on CI
+          # Use Linux CUDA 13.0 or Windows CUDA 12.8 for Blackwell support
+
+    env:
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.arch_list }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.30
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "cusparse", "cusparse_dev", "cusolver", "cusolver_dev", "cufft", "cufft_dev", "thrust", "visual_studio_integration"]'
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download and install CUDSS
+        shell: pwsh
+        run: |
+          $cudssUrl = "https://developer.download.nvidia.com/compute/cudss/redist/libcudss/windows-x86_64/libcudss-windows-x86_64-${{ env.CUDSS_VERSION }}_cuda12-archive.zip"
+          $cudssDir = "C:\cudss"
+          New-Item -ItemType Directory -Force -Path $cudssDir
+          Invoke-WebRequest -Uri $cudssUrl -OutFile "$env:TEMP\cudss.zip"
+          Expand-Archive -Path "$env:TEMP\cudss.zip" -DestinationPath "$env:TEMP\cudss_extract" -Force
+          # Move contents from extracted folder to cudss dir
+          $extractedDir = Get-ChildItem "$env:TEMP\cudss_extract" | Select-Object -First 1
+          Copy-Item -Path "$($extractedDir.FullName)\*" -Destination $cudssDir -Recurse -Force
+          echo "CUDSS_DIR=$cudssDir" >> $env:GITHUB_ENV
+          Get-ChildItem $cudssDir -Recurse | Select-Object FullName
+
+      - name: Set CUDA environment variables
+        run: |
+          # cuda-toolkit action sets CUDA_PATH, but PyTorch expects CUDA_HOME
+          echo "CUDA_HOME=$env:CUDA_PATH" >> $env:GITHUB_ENV
+          echo "CUDA_PATH=$env:CUDA_PATH"
+          echo "Setting CUDA_HOME to $env:CUDA_PATH"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install torch torchvision --index-url ${{ matrix.torch_index }}
+          python -m pip install numpy scipy
+
+      - name: Show environment info
+        run: |
+          echo "=== Python ==="
+          python --version
+          echo "=== PyTorch ==="
+          python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
+          echo "=== NVCC ==="
+          nvcc --version
+          echo "=== CUDA_PATH ==="
+          echo $env:CUDA_PATH
+          echo "=== CUDA_HOME ==="
+          echo $env:CUDA_HOME
+          echo "=== CUDSS_DIR ==="
+          echo $env:CUDSS_DIR
+          Get-ChildItem "$env:CUDSS_DIR\bin" -ErrorAction SilentlyContinue
+          echo "=== TORCH_CUDA_ARCH_LIST ==="
+          echo $env:TORCH_CUDA_ARCH_LIST
+
+      - name: Build wheel
+        run: |
+          $env:DISTUTILS_USE_SDK = "1"
+          pip wheel . --no-deps --no-build-isolation -w dist/
+        env:
+          DISTUTILS_USE_SDK: '1'
+
+      - name: Rename wheel with CUDA tag
+        shell: bash
+        run: |
+          cd dist
+          for f in *.whl; do
+            newname=$(echo "$f" | sed "s/\(bae-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
+            mv "$f" "$newname"
+          done
+          ls -la
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-windows-cu${{ matrix.cuda }}
+          path: dist/*.whl
+
+  # ============================================
+  # Collect and verify wheels
+  # ============================================
+  collect-wheels:
+    needs: [build-linux, build-linux-new-cuda, build-windows]
+    if: always() && (needs.build-linux.result == 'success' || needs.build-linux-new-cuda.result == 'success' || needs.build-windows.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: wheels
+          pattern: wheel-*
+          merge-multiple: true
+
+      - name: List all wheels
+        run: |
+          echo "=== Built Wheels ==="
+          ls -lh wheels/
+          echo ""
+          echo "=== Wheel Names ==="
+          for f in wheels/*.whl; do
+            echo "$(basename $f)"
+          done
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bae-wheels-all
+          path: wheels/*.whl
+          retention-days: 30
+
+  # ============================================
+  # Create GitHub Release
+  # ============================================
+  release:
+    needs: collect-wheels
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: bae-wheels-all
+          path: dist/
+
+      - name: Generate release notes
+        run: |
+          echo "## Wheels" >> notes.md
+          echo "" >> notes.md
+          echo "All wheels include bundled CUDA libraries and CUDSS for self-contained installation." >> notes.md
+          echo "" >> notes.md
+          echo "| Platform | CUDA | File |" >> notes.md
+          echo "|----------|------|------|" >> notes.md
+          for f in dist/*.whl; do
+            name=$(basename $f)
+            if [[ $name == *"linux"* ]]; then
+              platform="Linux"
+            elif [[ $name == *"win"* ]]; then
+              platform="Windows"
+            else
+              platform="Unknown"
+            fi
+            cuda=$(echo $name | grep -oP 'cu\d+\.\d+' || echo "unknown")
+            echo "| $platform | $cuda | \`$name\` |" >> notes.md
+          done
+          echo "" >> notes.md
+          echo "## Installation" >> notes.md
+          echo "" >> notes.md
+          echo '```bash' >> notes.md
+          echo "pip install <wheel_file>.whl" >> notes.md
+          echo '```' >> notes.md
+          echo "" >> notes.md
+          echo "## CUDA Compatibility" >> notes.md
+          echo "" >> notes.md
+          echo "| CUDA | PyTorch | GPU Architectures |" >> notes.md
+          echo "|------|---------|-------------------|" >> notes.md
+          echo "| 12.4 | 2.5.x | V100, T4, A100, RTX30xx, RTX40xx, H100 |" >> notes.md
+          echo "| 12.6 | 2.6.x | V100, T4, A100, RTX30xx, RTX40xx, H100 |" >> notes.md
+          echo "| 12.8 | 2.9.x | T4, A100, RTX30xx, RTX40xx, H100, **Blackwell** |" >> notes.md
+          echo "| 13.0 | 2.9.x | A100, RTX30xx, RTX40xx, H100, **Blackwell** (Linux only) |" >> notes.md
+          echo "" >> notes.md
+          echo "## Bundled Libraries" >> notes.md
+          echo "" >> notes.md
+          echo "Each wheel includes:" >> notes.md
+          echo "- CUDA runtime libraries (cudart, cublas, cusparse, cusolver)" >> notes.md
+          echo "- NVIDIA cuDSS (sparse direct solver)" >> notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.whl
+          body_path: notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
