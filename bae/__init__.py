@@ -8,6 +8,16 @@ _bundled_libs = os.path.join(_package_dir, 'libs')
 
 if sys.platform == 'win32':
     # Windows: Use os.add_dll_directory
+    # Always add torch's lib directory first (extensions depend on torch DLLs)
+    try:
+        import torch
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
+        if os.path.exists(torch_lib):
+            os.add_dll_directory(torch_lib)
+    except Exception:
+        pass
+
+    # Add bundled CUDA libs if present
     if os.path.exists(_bundled_libs):
         try:
             os.add_dll_directory(_bundled_libs)
@@ -15,14 +25,6 @@ if sys.platform == 'win32':
             pass
     else:
         # Fall back to system CUDA installation
-        try:
-            import torch
-            torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
-            if os.path.exists(torch_lib):
-                os.add_dll_directory(torch_lib)
-        except Exception:
-            pass
-
         # Add CUDA toolkit bin directory
         cuda_path = os.environ.get('CUDA_PATH', '')
         if cuda_path:
