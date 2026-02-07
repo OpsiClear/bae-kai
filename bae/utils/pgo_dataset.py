@@ -1,8 +1,33 @@
-import os,torch
+import os
+import torch
 import numpy as np
 import pypose as pp
 import torch.utils.data as Data
-from torchvision.datasets.utils import download_and_extract_archive
+import urllib.request
+import zipfile
+import tempfile
+
+
+def _download_and_extract(url, root):
+    """Download and extract a zip file."""
+    os.makedirs(root, exist_ok=True)
+    filename = os.path.basename(url)
+    filepath = os.path.join(root, filename)
+    extract_dir = os.path.join(root, filename.replace('.zip', ''))
+
+    # Skip if already extracted
+    if os.path.exists(extract_dir):
+        return
+
+    # Download
+    if not os.path.exists(filepath):
+        print(f"Downloading {url}...")
+        urllib.request.urlretrieve(url, filepath)
+
+    # Extract
+    print(f"Extracting {filepath}...")
+    with zipfile.ZipFile(filepath, 'r') as zf:
+        zf.extractall(root)
 
 
 class G2OPGO(Data.Dataset):
@@ -17,7 +42,7 @@ class G2OPGO(Data.Dataset):
         super().__init__()
 
         if download:
-            download_and_extract_archive(self.link, root)
+            _download_and_extract(self.link, root)
 
         def info2mat(info):
             mat = np.zeros((6,6))

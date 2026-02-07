@@ -1,9 +1,14 @@
-import matplotlib.pyplot as plt
 import torch
 import numpy as np
 
+
 @torch.no_grad()
 def plot_and_save(points, pngname, title='', axlim=None):
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        raise ImportError("matplotlib is required for plotting. Install with: pip install bae[examples]")
+
     points = points.detach().cpu().numpy()
     plt.figure(figsize=(7, 7))
     ax = plt.axes(projection='3d')

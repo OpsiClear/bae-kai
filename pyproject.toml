@@ -10,23 +10,25 @@ authors = [
 ]
 dependencies = [
     "torch>=2.0.0",
-    "torchvision",
     "warp-lang",
     "scipy",
-    "torchdata==0.8.0",
     "portalocker>=2.0.0",
-    "tqdm",
-    "matplotlib",
-    "bs4",
     "pypose",
     "triton-windows; sys_platform == 'win32'",
     "triton; sys_platform != 'win32'",
 ]
 
 [project.optional-dependencies]
+# Visualization and examples
+examples = [
+    "matplotlib",
+    "tqdm",
+]
 dev = [
     "pytest",
     "notebook",
+    "matplotlib",
+    "tqdm",
 ]
 
 [build-system]
@@ -61,4 +63,3 @@ explicit = true
 [tool.uv.sources]
 pypose = { git = "https://github.com/pypose/pypose.git", branch = "bae" }
 torch = { index = "pytorch-cu128" }
-torchvision = { index = "pytorch-cu128" }

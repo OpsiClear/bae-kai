@@ -9,23 +9,18 @@ In European Conference on Computer Vision (ECCV), 2010.
 Link to the dataset: https://grail.cs.washington.edu/projects/bal/
 """
 
-import torch, os, warnings
-import numpy as np
+import torch
+import os
+import bz2
+import re
+import urllib.request
 from functools import partial
-from operator import itemgetter, methodcaller
-from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
-from torchvision.transforms import Compose
-from scipy.spatial.transform import Rotation
-from torchdata.datapipes.iter import HttpReader, IterableWrapper, FileOpener
 import pypose as pp
 
 DTYPE = torch.float64
 
-# ignore bs4 warning
-warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
-
 # only export __all__
-__ALL__ = ['build_pipeline', 'read_bal_data', 'DATA_URL', 'ALL_DATASETS']
+__ALL__ = ['build_pipeline', 'read_bal_data', 'DATA_URL', 'ALL_DATASETS', 'get_problem']
 
 # base url for the BAL dataset, used to download the problem files
 DATA_URL = 'https://grail.cs.washington.edu/projects/bal/'
@@ -33,55 +28,56 @@ DATA_URL = 'https://grail.cs.washington.edu/projects/bal/'
 # all dataset names in the BAL dataset, used to check if the dataset name is valid
 ALL_DATASETS = ['ladybug', 'trafalgar', 'dubrovnik', 'venice', 'final']
 
-# helper for torchdata, add base url to the file name
-_with_base_url = partial(os.path.join, DATA_URL)
 
-# helper for torchdata, check if s ends with b
-def _endswith(s, b):
-    return s.endswith(b)
+def _get_problem_urls(dataset, cache_dir):
+    """Get list of problem URLs from the dataset HTML page."""
+    os.makedirs(cache_dir, exist_ok=True)
 
-# helper for torchdata, check if s is not None
-def _not_none(s):
-    return s is not None
+    html_url = DATA_URL + dataset + '.html'
+    cache_file = os.path.join(cache_dir, dataset + '.html')
 
-# extract problem file urls from the problem url
-def _problem_lister(*problem_url, cache_dir):
-    problem_list_dp = IterableWrapper(problem_url).on_disk_cache(
-        filepath_fn=Compose([os.path.basename, partial(os.path.join, cache_dir)]),
-    )
-    problem_list_dp = HttpReader(problem_list_dp).end_caching(same_filepath_fn=True)
+    # Download HTML if not cached
+    if not os.path.exists(cache_file):
+        urllib.request.urlretrieve(html_url, cache_file)
 
-    # read the cached problem list html file
-    problem_list_dp = FileOpener(problem_list_dp)
-    problem_list_dp = problem_list_dp.readlines(return_path=False
-    # parse HTML <a> tag's href attributes using bs4
-    ).map(partial(BeautifulSoup, features="html.parser")).map(methodcaller('find', 'a')
-    # must end with .bz2
-    ).filter(_not_none).map(methodcaller('get', 'href')).filter(partial(_endswith, b='.bz2')
-    # add base url
-    ).map(_with_base_url)
+    # Parse HTML to find .bz2 links using regex (avoids bs4 dependency)
+    with open(cache_file, 'r') as f:
+        html = f.read()
 
-    # sort the problem files by the number of images
-    problem_list_sorted = sorted(list(problem_list_dp), key=lambda x: int(os.path.basename(x).split('-')[1]))
-    problem_list_dp = IterableWrapper(problem_list_sorted)
+    # Find all href attributes ending with .bz2
+    pattern = r'href=["\']([^"\']*\.bz2)["\']'
+    matches = re.findall(pattern, html)
 
-    return problem_list_dp
+    # Build full URLs and sort by number of images
+    urls = [DATA_URL + m for m in matches]
+    urls.sort(key=lambda x: int(os.path.basename(x).split('-')[1]))
 
-# download and decompress the problem files
-def _download_pipe(cache_dir, url_dp, suffix: str):
-    # cache compressed files
-    cache_compressed = url_dp.on_disk_cache(
-        filepath_fn=Compose([os.path.basename, partial(os.path.join, cache_dir)]) ,
-    )
-    cache_compressed = HttpReader(cache_compressed).end_caching(same_filepath_fn=True)
-    # cache decompressed files
-    cache_decompressed = cache_compressed.on_disk_cache(
-        filepath_fn=Compose([partial(str.split, sep=suffix), itemgetter(0)]),
-    )
-    cache_decompressed = cache_decompressed.open_files(mode="b").load_from_bz2().end_caching(
-        same_filepath_fn=True
-    )
-    return cache_decompressed
+    return urls
+
+
+def _download_and_decompress(url, cache_dir):
+    """Download and decompress a .bz2 file, return path to decompressed file."""
+    os.makedirs(cache_dir, exist_ok=True)
+
+    filename = os.path.basename(url)
+    compressed_path = os.path.join(cache_dir, filename)
+    decompressed_path = compressed_path.replace('.bz2', '')
+
+    # Return cached decompressed file if exists
+    if os.path.exists(decompressed_path):
+        return decompressed_path
+
+    # Download if not cached
+    if not os.path.exists(compressed_path):
+        urllib.request.urlretrieve(url, compressed_path)
+
+    # Decompress
+    with bz2.open(compressed_path, 'rb') as f_in:
+        with open(decompressed_path, 'wb') as f_out:
+            f_out.write(f_in.read())
+
+    return decompressed_path
+
 
 def read_bal_data(file_name: str, use_quat=False) -> dict:
     """
@@ -151,30 +147,51 @@ def read_bal_data(file_name: str, use_quat=False) -> dict:
         for i in range(n_points * 3):
             points_3d[i] = float(file.readline())
         points_3d = points_3d.reshape((n_points, -1))
-    
+
     if use_quat:
         # convert Rodrigues vector to unit quaternion for camera rotation
-        # camera_params[0:3] is the Rodrigues vector
-        # after conversion, camera_params[0:4] is the unit quaternion
-        # r = Rotation.from_rotvec(camera_params[:, :3])
-        # q = r.as_quat()
         r = pp.so3(camera_params[:, :3])
         q = r.Exp()
-        # [tx, ty, tz, q0, q1, q2, q3, f, k1, k2]
         camera_params = torch.cat([camera_params[:, 3:6], q, camera_params[:, 6:]], axis=1)
     else:
         camera_params = torch.cat([camera_params[:, 3:6], camera_params[:, :3], camera_params[:, 6:]], axis=1)
 
     # convert camera_params to torch.Tensor
-    camera_params = torch.tensor(camera_params).to(DTYPE)
+    camera_params = camera_params.clone().detach().to(DTYPE)
 
-    return {'problem_name': os.path.splitext(os.path.basename(file_name))[0], # str
-            'camera_params': camera_params, # torch.Tensor (n_cameras, 9 or 10)
-            'points_3d': points_3d, # torch.Tensor (n_points, 3)
-            'points_2d': points_2d, # torch.Tensor (n_observations, 2)
-            'camera_index_of_observations': camera_indices, # torch.Tensor (n_observations,)
-            'point_index_of_observations': point_indices, # torch.Tensor (n_observations,)
+    return {'problem_name': os.path.splitext(os.path.basename(file_name))[0],
+            'camera_params': camera_params,
+            'points_3d': points_3d,
+            'points_2d': points_2d,
+            'camera_index_of_observations': camera_indices,
+            'point_index_of_observations': point_indices,
             }
+
+
+class BALDataset:
+    """Iterator over BAL dataset problems."""
+
+    def __init__(self, dataset='ladybug', cache_dir='bal_data', use_quat=False):
+        self.urls = _get_problem_urls(dataset, cache_dir)
+        self.cache_dir = cache_dir
+        self.use_quat = use_quat
+        self._index = 0
+
+    def __iter__(self):
+        self._index = 0
+        return self
+
+    def __next__(self):
+        if self._index >= len(self.urls):
+            raise StopIteration
+        url = self.urls[self._index]
+        self._index += 1
+        file_path = _download_and_decompress(url, self.cache_dir)
+        return read_bal_data(file_path, use_quat=self.use_quat)
+
+    def __len__(self):
+        return len(self.urls)
+
 
 def build_pipeline(dataset='ladybug', cache_dir='bal_data', use_quat=False):
     """
@@ -187,50 +204,35 @@ def build_pipeline(dataset='ladybug', cache_dir='bal_data', use_quat=False):
         Must be one of ['ladybug', 'trafalgar', 'dubrovnik', 'venice', 'final'].
     cache_dir : str, optional
         The directory to cache the downloaded files, by default 'bal_data'.
+    use_quat : bool, optional
+        Whether to use quaternion for rotation, by default False.
 
     Returns
     -------
-    dp : torchdata.datapipes.IterableWrapper
-        The pipeline for the dataset.
-        In each iteration, return a dictionary containing the following fields:
-        - problem_name: str
-            The name of the problem.
-        - camera_params: torch.Tensor (n_cameras, 9 or 10)
-            contains camera parameters for each camera. If use_quat is True, the shape is (n_cameras, 10).
-        - points_3d: torch.Tensor (n_points, 3)
-            contains initial estimates of point coordinates in the world frame.
-        - points_2d: torch.Tensor (n_observations, 2)
-            contains measured 2-D coordinates of points projected on images in each observations.
-        - camera_index_of_observations: torch.Tensor (n_observations,)
-            contains indices of cameras (from 0 to n_cameras - 1) involved in each observation.
-        - point_index_of_observations: torch.Tensor (n_observations,)
-            contains indices of points (from 0 to n_points - 1) involved in each observation.
+    BALDataset
+        An iterable over the dataset problems.
     """
-    global ALL_DATASETS
     print(f"Streaming data for {dataset}...")
     assert dataset in ALL_DATASETS, f"dataset_name must be one of {ALL_DATASETS}"
-    url_dp = _problem_lister(_with_base_url(dataset + '.html'), cache_dir=cache_dir)
-    download_dp = _download_pipe(cache_dir=cache_dir, url_dp=url_dp, suffix='.bz2')
-    bal_data_dp = download_dp.map(partial(read_bal_data, use_quat=use_quat))
-    return bal_data_dp
+    return BALDataset(dataset=dataset, cache_dir=cache_dir, use_quat=use_quat)
+
 
 def get_problem(problem_name, dataset, cache_dir='bal_data', use_quat=False):
-    global ALL_DATASETS
+    """Get a specific problem from the BAL dataset."""
     print(f"Streaming data for {dataset}...")
     assert dataset in ALL_DATASETS, f"dataset_name must be one of {ALL_DATASETS}"
-    url_dp = _problem_lister(_with_base_url(dataset + '.html'), cache_dir=cache_dir)
-    def filter_problem(x):
-        basename = os.path.basename(x)
-        return basename in {problem_name, problem_name + '.txt', problem_name + '.txt.bz2'}
-    url_dp = url_dp.filter(filter_problem)
-    download_dp = _download_pipe(cache_dir=cache_dir, url_dp=url_dp, suffix='.bz2')
-    bal_data_dp = download_dp.map(partial(read_bal_data, use_quat=use_quat))
-    dataset_iterator = iter(bal_data_dp)
-    try:
-        problem = next(dataset_iterator)
-    except StopIteration:
-        raise ValueError(f"Problem {problem_name} not found in dataset {dataset}.")
-    return problem
+
+    urls = _get_problem_urls(dataset, cache_dir)
+
+    # Find matching URL
+    for url in urls:
+        basename = os.path.basename(url)
+        if basename in {problem_name + '.txt.bz2', problem_name + '.bz2'}:
+            file_path = _download_and_decompress(url, cache_dir)
+            return read_bal_data(file_path, use_quat=use_quat)
+
+    raise ValueError(f"Problem {problem_name} not found in dataset {dataset}.")
+
 
 def _test():
     dp = build_pipeline()
@@ -249,7 +251,7 @@ def _test():
         # check dtype is float64
         assert DTYPE == points.dtype == pixels.dtype == camera_params.dtype, "dtype not float64."
         print(problem_name, 'ok')
-    
+
     for dataset in ALL_DATASETS:
         dp = build_pipeline(dataset=dataset, use_quat=True)
         print("Testing dataset pipeline with use_quat=True...")
@@ -257,11 +259,9 @@ def _test():
             camera_params = i['camera_params']
             assert camera_params.size(-1) == 10, "Shape not compatible."
             assert DTYPE == camera_params.dtype, "dtype not float64."
-            # test if the quaternion is unit
-            q = camera_params[:, :4]
-            # assert torch.allclose(torch.norm(q, dim=1), torch.ones(q.size(0))), "Quaternion is not unit."
             print(i['problem_name'], 'ok')
         print("All tests passed!")
+
 
 if __name__ == '__main__':
     _test()
