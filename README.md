@@ -46,7 +46,7 @@ uv pip install bae-kai
 
 | Platform | CUDA | Architectures |
 |----------|------|---------------|
-| Linux | 12.4, 13.0 | sm_70 - sm_120 |
+| Linux | 12.4, 12.8, 13.0 | sm_70 - sm_120 |
 | Windows | 12.4, 12.6, 12.8 | sm_70 - sm_120 |
 
 ### From Source

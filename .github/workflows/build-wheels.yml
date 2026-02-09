@@ -43,9 +43,12 @@ jobs:
             cuda_full: '12.4.0'
             torch_index: 'https://download.pytorch.org/whl/cu124'
             arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
-          # Note: CUDA 12.6/12.8 Linux disabled - devel images too large for CI runner disk
-          # cu12.4 covers sm_70-90, cu13.0 covers sm_80-120 (including Blackwell)
-          # Windows builds for 12.6/12.8 are retained (no container, no disk issue)
+          # Note: CUDA 12.6 Linux disabled - devel image too large for CI runner disk
+          # CUDA 12.8 builds - Blackwell support (sm_70/75/80 covered by cu12.4)
+          - cuda: '12.8'
+            cuda_full: '12.8.0'
+            torch_index: 'https://download.pytorch.org/whl/cu128'
+            arch_list: "8.6;8.9;9.0;12.0"
           # CUDA 13.0 builds (PyTorch 2.9.x) - full sm_120 support
           - cuda: '13.0'
             cuda_full: '13.0.0'
@@ -153,7 +156,7 @@ jobs:
         run: |
           echo "=== Disk before build ==="
           df -h
-          MAX_JOBS=2 pip wheel . --no-deps --no-build-isolation -w dist/
+          MAX_JOBS=1 pip wheel . --no-deps --no-build-isolation -w dist/
           echo "=== Disk after build ==="
           df -h
           # Clean build artifacts to free space
