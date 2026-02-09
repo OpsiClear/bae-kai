@@ -338,58 +338,30 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download wheels
-        uses: actions/download-artifact@v4
-        with:
-          name: bae-wheels-all
-          path: dist/
-
       - name: Generate release notes
         run: |
-          echo "## Wheels" >> notes.md
-          echo "" >> notes.md
-          echo "All wheels include bundled CUDA libraries and CUDSS for self-contained installation." >> notes.md
-          echo "" >> notes.md
-          echo "| Platform | CUDA | File |" >> notes.md
-          echo "|----------|------|------|" >> notes.md
-          for f in dist/*.whl; do
-            name=$(basename $f)
-            if [[ $name == *"linux"* ]]; then
-              platform="Linux"
-            elif [[ $name == *"win"* ]]; then
-              platform="Windows"
-            else
-              platform="Unknown"
-            fi
-            cuda=$(echo $name | grep -oP 'cu\d+\.\d+' || echo "unknown")
-            echo "| $platform | $cuda | \`$name\` |" >> notes.md
-          done
-          echo "" >> notes.md
-          echo "## Installation" >> notes.md
-          echo "" >> notes.md
-          echo '```bash' >> notes.md
-          echo "pip install <wheel_file>.whl" >> notes.md
-          echo '```' >> notes.md
-          echo "" >> notes.md
-          echo "## CUDA Compatibility" >> notes.md
-          echo "" >> notes.md
-          echo "| CUDA | PyTorch | GPU Architectures |" >> notes.md
-          echo "|------|---------|-------------------|" >> notes.md
-          echo "| 12.4 | 2.5.x | V100, T4, A100, RTX30xx, RTX40xx, H100 |" >> notes.md
-          echo "| 12.6 | 2.6.x | V100, T4, A100, RTX30xx, RTX40xx, H100 |" >> notes.md
-          echo "| 12.8 | 2.9.x | T4, A100, RTX30xx, RTX40xx, H100, **Blackwell** |" >> notes.md
-          echo "| 13.0 | 2.9.x | A100, RTX30xx, RTX40xx, H100, **Blackwell** (Linux only) |" >> notes.md
-          echo "" >> notes.md
-          echo "## Bundled Libraries" >> notes.md
-          echo "" >> notes.md
-          echo "Each wheel includes:" >> notes.md
-          echo "- CUDA runtime libraries (cudart, cublas, cusparse, cusolver)" >> notes.md
-          echo "- NVIDIA cuDSS (sparse direct solver)" >> notes.md
+          cat > notes.md << 'NOTES'
+          ## Installation
+
+          ```bash
+          pip install bae-kai
+          ```
+
+          ## Available Wheels
+
+          | Platform | CUDA | Architectures |
+          |----------|------|---------------|
+          | Linux | 12.4, 12.8, 13.0 | sm_70 - sm_120 |
+          | Windows | 12.4, 12.6, 12.8 | sm_70 - sm_120 |
+
+          All wheels include bundled CUDA libraries and cuDSS.
+          Wheels are available on [PyPI](https://pypi.org/project/bae-kai/).
+          Build artifacts are attached to the [workflow run](https://github.com/OpsiClear/bae-kai/actions/workflows/build-wheels.yml).
+          NOTES
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.whl
           body_path: notes.md
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
