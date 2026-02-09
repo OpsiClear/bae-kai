@@ -334,7 +334,7 @@ jobs:
   release:
     needs: collect-wheels
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.collect-wheels.result == 'success'
     permissions:
       contents: write
     steps:
