@@ -5,9 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.1] - 2026-02-09
 
 ### Added
+- Auto-selection API for LM optimizer (solver, strategy, method)
+- String-based configuration (`solver="pcg"`, `method="schur"`)
+- SchurLM refactored as thin LM wrapper
+- Public exports in `bae.autograd` and `bae.utils` `__init__` files
 - Full Windows CUDA extension support
 - Blackwell (sm_120) architecture support for RTX 50-series
 - CUDA 12.4, 12.6, 12.8, 13.0 wheel builds
@@ -18,10 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PyPI publishing workflow
 
 ### Changed
+- Dead code and unused imports removed from autograd, sparse modules
 - License changed to AGPL-3.0-only
 - CUDA extensions now required (no Python fallbacks)
 
 ### Fixed
+- `_compute_jd` shape bug with list-mode jacobians in strategy update
 - Disk space issues in CI builds
 - MSVC linker detection on Windows
 - Triton compatibility on Windows

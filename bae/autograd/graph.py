@@ -1,11 +1,42 @@
+"""Sparse jacobian computation via operation tracing.
 
-from typing import Optional
+This module provides the core automatic differentiation functionality for
+computing sparse block jacobians through operation tracing.
+
+Key functions:
+- jacobian(): Compute sparse block jacobians for traced operations
+- backward(): Walk the operation trace to compute jacobians
+- construct_sbt(): Construct sparse block tensors from traced data
+"""
+
+import logging
 
 import torch
+from torch import Tensor
 from torch.func import jacrev
 
+_logger = logging.getLogger(__name__)
 
-def construct_sbt(jac_from_vmap, num, index: Optional[torch.Tensor], type=torch.sparse_bsc):
+
+def construct_sbt(jac_from_vmap, num, index: torch.Tensor | None, type=torch.sparse_bsc):
+    """Construct a sparse block tensor from jacobian blocks.
+
+    Parameters
+    ----------
+    jac_from_vmap : torch.Tensor
+        Jacobian blocks computed via vmap, shape (N, block_rows, block_cols).
+    num : int
+        Number of columns in the block-sparse matrix.
+    index : torch.Tensor, optional
+        Column indices for each block. If None, uses identity indices.
+    type : torch.dtype
+        Sparse tensor type, either torch.sparse_bsc or torch.sparse_bsr.
+
+    Returns
+    -------
+    torch.Tensor
+        Sparse block tensor in BSC or BSR format.
+    """
     if index is None:
         index = torch.arange(num, device=jac_from_vmap.device, dtype=torch.int32)
     n = index.shape[0] # num 2D points
@@ -43,7 +74,7 @@ def amend_trace(arg, jac_trace: tuple):
     else:
         arg.jactrace = jac_trace
 
-def update_from_trace(bsrt: torch.Tensor, arg, new_col: Optional[torch.Tensor]=None, new_val: Optional[torch.Tensor]=None):
+def update_from_trace(bsrt: torch.Tensor, arg, new_col: torch.Tensor | None = None, new_val: torch.Tensor | None = None):
     if new_col is not None:
         jac_trace = torch.sparse_bsr_tensor(
                 col_indices=new_col, 
@@ -63,19 +94,37 @@ def update_from_trace(bsrt: torch.Tensor, arg, new_col: Optional[torch.Tensor]=N
     return jac_trace
 
 def backward(output_):
+    """Walk the operation trace backward to compute jacobians.
+
+    Recursively processes the operation trace attached to output_, computing
+    jacobian blocks for each traced operation. Handles both 'map' operations
+    (function applications) and 'index' operations (tensor indexing).
+
+    Parameters
+    ----------
+    output_ : TrackingTensor
+        Output tensor with attached operation trace (optrace attribute).
+
+    Notes
+    -----
+    This function modifies parameters in-place, attaching jactrace attributes
+    containing jacobian information. The jacobian() function collects these
+    traces and constructs the final sparse block jacobian matrices.
+    """
     if output_.optrace[id(output_)][0] == 'map':
         func = output_.optrace[id(output_)][1]
         args = output_.optrace[id(output_)][2]
         argnums = tuple(idx for idx, arg in enumerate(args) if hasattr(arg, 'optrace') or isinstance(arg, torch.nn.Parameter))
         if len(argnums) == 0:
-            warning("No upstream parameters to compute jacobian")
+            _logger.warning("No upstream parameters to compute jacobian")
             return
         jac_blocks = torch.vmap(jacrev(func, argnums=argnums))(*args)
         for jacidx, argidx in enumerate(argnums):
             jac_block = jac_blocks[jacidx]
             arg = args[argidx]
             assert jac_block.ndim == 3, "`func` is not properly vectorized in `torch.vmap`"
-            # TODO: perhaps flatten the jacobian block in the future
+            # Jacobian blocks are kept as 3D tensors (batch, rows, cols) to preserve
+            # block structure for BSR format. Flattening would lose sparsity benefits.
             if not hasattr(output_, 'jactrace'):  # check for upstream jacobian
                 jac_trace = (None, jac_block)  # leave None for identity indices
             else:
@@ -134,7 +183,44 @@ def backward(output_):
             backward(arg)
 
 
-def jacobian(output, params):
+def jacobian(output: Tensor, params: list[torch.nn.Parameter]) -> list[Tensor]:
+    """Compute sparse block jacobians for traced operations.
+
+    Walks the operation trace attached to output and computes sparse block
+    jacobians with respect to each parameter in params.
+
+    Parameters
+    ----------
+    output : TrackingTensor
+        Output tensor from traced operations. Must have optrace attribute
+        with last operation being 'map' or 'index'.
+    params : list of torch.nn.Parameter
+        List of parameters to compute jacobians for.
+
+    Returns
+    -------
+    list of torch.Tensor
+        List of sparse BSR jacobian matrices, one per parameter.
+        Each jacobian has shape (output_size, param_size) with block
+        structure determined by the traced operations.
+
+    Raises
+    ------
+    AssertionError
+        If the last operation in the trace is not 'map' or 'index'.
+
+    Notes
+    -----
+    For SE(3) parameters (with trim_SE3_grad=True), the jacobian is computed
+    in the 6-DOF tangent space, removing the redundant 7th element.
+
+    Examples
+    --------
+    >>> from bae.autograd import jacobian, TrackingTensor
+    >>> x = TrackingTensor(data, requires_grad=True)
+    >>> y = traced_function(x)
+    >>> J = jacobian(y, [param1, param2])
+    """
     assert output.optrace[id(output)][0] in ('map', 'index'), "Unsupported last operation in compute graph"
     backward(output)
     res = []

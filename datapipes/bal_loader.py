@@ -44,8 +44,8 @@ def _get_problem_urls(dataset, cache_dir):
     with open(cache_file, 'r') as f:
         html = f.read()
 
-    # Find all href attributes ending with .bz2
-    pattern = r'href=["\']([^"\']*\.bz2)["\']'
+    # Find all href attributes ending with .bz2 (with or without quotes)
+    pattern = r'href=(?:["\'])?([^\s"\'<>]*\.bz2)(?:["\'])?'
     matches = re.findall(pattern, html)
 
     # Build full URLs and sort by number of images

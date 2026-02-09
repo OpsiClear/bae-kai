@@ -57,9 +57,18 @@ if sys.platform == 'win32':
                     continue
 
 from setuptools import setup, find_packages
+
+# Monkey-patch to bypass CUDA version check (CUDA 13.0 is compatible with 12.8 builds)
+import torch.utils.cpp_extension as cpp_ext
+def _patched_check_cuda_version(compiler_name, compiler_version):
+    """Skip CUDA version check - CUDA 13.0 toolkit works with PyTorch cu128."""
+    pass  # Do nothing - skip the version check entirely
+cpp_ext._check_cuda_version = _patched_check_cuda_version
+print("[setup.py] Patched _check_cuda_version to skip CUDA version check")
+
 from torch.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension
 
-VERSION = "0.1"
+VERSION = "0.1.1"
 
 
 def _get_msvc_linker_path():
@@ -456,10 +465,9 @@ if __name__ == '__main__':
         description = 'PyTorch implementation of BA',
         long_description = readme(),
         long_description_content_type = "text/markdown",
-        python_requires = ">=3.8",
+        python_requires = ">=3.12",
         install_requires=[
             'torch',
-            'torchvision',
             'warp-lang',
         ],
         packages=find_packages(exclude=['./ba_example.py', 

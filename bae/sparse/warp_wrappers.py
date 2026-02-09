@@ -2,7 +2,6 @@
 # https://nvidia.github.io/warp/modules/sparse.html
 import warp as wp
 from warp import sparse as wps
-from warp.optim import linear as wpol
 import torch
 wp.init()
 
@@ -70,23 +69,7 @@ def _sparse_csr_add(input, other, alpha=1.0):
     res = wp2torchbsr(res)
     return res
 
+# Register sparse CSR add operation using Warp
 from torch.library import Library
 sparse_lib = Library('aten', 'IMPL')
 sparse_lib.impl('add.Tensor', _sparse_csr_add, 'SparseCsrCUDA')
-# this will, however, invalidate add_sparse_csr
-
-
-if __name__ == '__main__':
-    crow_indices = torch.tensor([0, 2, 4], dtype=torch.int32)
-    col_indices = torch.tensor([0, 1, 0, 1], dtype=torch.int32)
-    values = torch.tensor([[[0, 1, 2], [6, 7, 8]],
-                        [[3, 4, 5], [9, 10, 11]],
-                        [[12, 13, 14], [18, 19, 20]],
-                        [[15, 16, 17], [21, 22, 23]]])
-
-    bsr = torch.sparse_bsr_tensor(crow_indices, col_indices, values, dtype=torch.float32).to('cuda')
-    print(bsr.to_dense())
-    a = torchbsr2wp(bsr)
-    print(a.transpose() @ a)
-    print(wp2torchbsr(a).to_dense())
-    # print(wpol.preconditioner(a))

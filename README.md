@@ -34,12 +34,12 @@ Pre-built wheels with CUDA extensions are available on PyPI:
 
 ```bash
 # Install with CUDA 12.8 (for RTX 30/40/50 series)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-pip install bae-kai
+uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+uv pip install bae-kai
 
 # Or with CUDA 13.0 (latest)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-pip install bae-kai
+uv pip install torch --index-url https://download.pytorch.org/whl/cu130
+uv pip install bae-kai
 ```
 
 ### Available Wheels
@@ -59,10 +59,10 @@ git clone https://github.com/OpsiClear/bae-kai.git
 cd bae-kai
 
 # Install PyPose from the bae branch
-pip install git+https://github.com/pypose/pypose.git@bae
+uv pip install git+https://github.com/pypose/pypose.git@bae
 
-# Install in development mode
-pip install -e .
+# Install in development mode (uv sync handles all dependencies)
+uv sync
 ```
 
 ### Build Options
@@ -82,13 +82,9 @@ Bundle Adjustment optimizes camera poses and 3D point positions to minimize repr
 
 ```python
 import torch
-import pypose as pp
 from datapipes.bal_loader import get_problem
-from ba_helpers import ReprojNonBatched, least_square_error
-from bae.sparse.py_ops import *
-from bae.sparse.solve import *
+from ba_helpers import Reproj
 from bae.optim import LM
-from bae.utils.pysolvers import PCG
 
 # Load a problem from the BAL dataset
 dataset = get_problem("problem-49-7776-pre", "ladybug", use_quat=True)
@@ -107,16 +103,37 @@ model = Reproj(
     dataset['points_3d'].clone()
 ).to('cuda')
 
-# Configure optimizer
-strategy = pp.optim.strategy.TrustRegion(up=2.0, down=0.5**4)
-solver = PCG(tol=1e-4, maxiter=250)
-optimizer = LM(model, strategy=strategy, solver=solver, reject=30)
+# Auto-selection: solver, strategy, and method are chosen automatically
+optimizer = LM(model, reject=30)
 
 # Run optimization for multiple iterations
 for idx in range(20):
     loss = optimizer.step(input)
     print(f'Iteration {idx}, loss: {loss.item()}')
 ```
+
+For more control, you can configure the optimizer explicitly:
+
+```python
+# String-based configuration
+optimizer = LM(model, solver="pcg", strategy="trustregion", method="schur")
+
+# Object-based configuration (backward-compatible)
+from bae.utils.pysolvers import PCG
+from bae.utils.schur import TrustRegion
+optimizer = LM(model, solver=PCG(tol=1e-4, maxiter=250), strategy=TrustRegion())
+```
+
+See [`ba_example.py`](ba_example.py) for a complete working example.
+
+### API Overview
+
+| Module | Exports | Description |
+|--------|---------|-------------|
+| `bae.optim` | `LM`, `SchurLM` | Levenberg-Marquardt optimizer with auto-selection |
+| `bae.autograd` | `TrackingTensor`, `map_transform`, `jacobian` | Sparse jacobian via operation tracing |
+| `bae.utils` | `PCG`, `PCG_`, `CuDSS`, `SciPySpSolver` | Linear solvers |
+| `bae.utils` | `TrustRegion`, `Adaptive` | Damping strategies |
 
 ### Integration with VGGT
 

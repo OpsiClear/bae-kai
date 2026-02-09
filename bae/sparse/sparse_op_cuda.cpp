@@ -248,7 +248,11 @@ torch::Tensor sparse_bsr_csr_mm(const torch::Tensor &a, const torch::Tensor &b)
   }
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("sparse_bsr_bsc_mm", &sparse_bsr_csr_mm,
+          "BSR x BSC sparse matrix multiplication (CUDA)",
+          pybind11::arg("bsr"), pybind11::arg("bsc"));
+}
 
 TORCH_LIBRARY_IMPL(aten, SparseCsrCUDA, m)
 {

@@ -87,6 +87,8 @@ uv run python pgo.py
 
 3. **Solver selection**: `PCG(tol, maxiter)` for CPU/GPU iterative solving, `CuDSS()` for direct GPU solving (requires CUDSS library).
 
+4. **Auto-selection API**: `LM(model)` auto-detects solver, strategy, and method at the first `step()` call. String-based: `LM(model, solver="pcg", method="schur")`. Object-based (backward-compatible): `LM(model, solver=PCG(), strategy=TrustRegion())`.
+
 ### Data Loading (`datapipes/`)
 
 - `bal_loader.py`: Loads BAL (Bundle Adjustment in the Large) datasets
@@ -103,4 +105,5 @@ uv run python pgo.py
 
 - PyTorch 2.0+ with CUDA 12.8 (configured via uv index)
 - PyPose (bae branch) for SE(3)/se(3) Lie group operations
-- scipy, torchdata, warp-lang
+- warp-lang for sparse matrix operations
+- scipy (optional, only for `SciPySpSolver`)

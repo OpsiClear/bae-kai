@@ -2,7 +2,16 @@ from functools import partial
 import torch
 import pytest
 from bae.sparse import bsr, bsr_cuda, diagonal_op_
-from torchvision.transforms import Compose
+
+
+def compose(*funcs):
+    """Simple function composition (replaces torchvision.transforms.Compose)."""
+    def composed(x):
+        for f in funcs:
+            x = f(x)
+        return x
+    return composed
+
 
 def random_compressed(pshape, bshape, mode, zero_prob=0., block_prob=0.5):
     #generate coo
@@ -27,7 +36,7 @@ def random_compressed(pshape, bshape, mode, zero_prob=0., block_prob=0.5):
         return torch.sparse_bsc_tensor(crowi, coli, values, (m, p), dtype=values.dtype)
     
 diag_max_thres = 1e-3
-diag_clamp_oop = Compose([torch.diagonal, partial(torch.clamp, max=diag_max_thres)])
+diag_clamp_oop = compose(torch.diagonal, partial(torch.clamp, max=diag_max_thres))
 
 def diag_clamp_inp(x):
     diag_clamp_oop(x)
