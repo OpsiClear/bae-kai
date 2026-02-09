@@ -27,8 +27,11 @@ _skip_ext = _os.environ.get("BAE_SKIP_EXTENSIONS", "0") in ("1", "true", "yes")
 if not _skip_ext:
     from .spgemm import convert_indices_from_csr_to_coo
 else:
-    # Fallback: spgemm just wraps at::_convert_indices_from_csr_to_coo
-    convert_indices_from_csr_to_coo = torch._convert_indices_from_csr_to_coo
+    # Fallback: spgemm wraps at::_convert_indices_from_csr_to_coo but the
+    # Python binding only accepts (crow_indices, col_indices) — not the extra
+    # out_int32/transpose flags the C++ wrapper exposes.
+    def convert_indices_from_csr_to_coo(crow_indices, col_indices, out_int32=False, transpose=False):
+        return torch._convert_indices_from_csr_to_coo(crow_indices, col_indices)
 
 _logger = logging.getLogger(__name__)
 

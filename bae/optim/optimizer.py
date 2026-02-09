@@ -24,7 +24,10 @@ _skip_ext = _os.environ.get("BAE_SKIP_EXTENSIONS", "0") in ("1", "true", "yes")
 if not _skip_ext:
     from ..sparse.spgemm import CuSparse
 else:
-    CuSparse = None
+    class CuSparse:
+        """Stub when CUDA extensions are unavailable."""
+        def __call__(self, *args, **kwargs):
+            raise RuntimeError("CuSparse requires CUDA extensions (BAE_SKIP_EXTENSIONS is set)")
 
 _logger = logging.getLogger(__name__)
 
