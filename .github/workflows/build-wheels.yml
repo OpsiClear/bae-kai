@@ -43,12 +43,8 @@ jobs:
             cuda_full: '12.4.0'
             torch_index: 'https://download.pytorch.org/whl/cu124'
             arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
-          # CUDA 12.6 builds (PyTorch 2.6+ compatibility)
-          - cuda: '12.6'
-            cuda_full: '12.6.3'
-            torch_index: 'https://download.pytorch.org/whl/cu126'
-            # sm_70/75 covered by cu12.4 wheel; fewer archs to fit CI disk
-            arch_list: "8.0;8.6;8.9;9.0"
+          # Note: CUDA 12.6 Linux disabled - cu12.6.3 devel image too large for CI runner disk
+          # Users needing cu12.6: use cu12.4 wheel (compatible) or build from source
           # CUDA 12.8 builds (PyTorch 2.9.x) - includes sm_120 (Blackwell)
           - cuda: '12.8'
             cuda_full: '12.8.0'
