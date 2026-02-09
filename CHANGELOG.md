@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Dead code and unused imports removed from autograd, sparse modules
-- License changed to AGPL-3.0-only
+- Dual license: original code Apache-2.0, additions AGPL-3.0-only
 - CUDA extensions now required (no Python fallbacks)
 
 ### Fixed

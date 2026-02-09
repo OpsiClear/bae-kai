@@ -1,7 +1,7 @@
 # `bae-kai`: Bundle Adjustment in the Eager-mode
 
 [![PyPI version](https://badge.fury.io/py/bae-kai.svg)](https://pypi.org/project/bae-kai/)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![License](https://img.shields.io/badge/License-Apache%202.0%20%2B%20AGPL%203.0-blue.svg)](LICENSE)
 
 > **⚠️ Development Phase Notice**: This library is currently in active development. APIs are subject to change and should be considered experimental. Use at your own discretion in production environments.
 
