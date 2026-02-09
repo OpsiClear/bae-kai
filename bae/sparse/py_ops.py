@@ -21,8 +21,14 @@ from torch.library import Library
 from torch.utils._triton import has_triton
 from ..exceptions import BAESparsityError
 
-# CUDA extension required - no fallback
-from .spgemm import convert_indices_from_csr_to_coo
+import os as _os
+_skip_ext = _os.environ.get("BAE_SKIP_EXTENSIONS", "0") in ("1", "true", "yes")
+
+if not _skip_ext:
+    from .spgemm import convert_indices_from_csr_to_coo
+else:
+    # Fallback: spgemm just wraps at::_convert_indices_from_csr_to_coo
+    convert_indices_from_csr_to_coo = torch._convert_indices_from_csr_to_coo
 
 _logger = logging.getLogger(__name__)
 
