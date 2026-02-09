@@ -37,7 +37,7 @@ jobs:
           BAE_SKIP_EXTENSIONS: '1'
         run: |
           python -c "import torch; print('torch', torch.__version__)"
-          python -m pytest tests/ -v --ignore=tests/sparse/test_jtj.py --ignore=tests/sparse/test_solve.py -k "not cuda"
+          python -m pytest tests/ -v --ignore=tests/sparse/test_jtj.py --ignore=tests/sparse/test_solve.py --ignore=tests/sparse/test_bsr.py -k "not cuda"
 
   test-windows:
     runs-on: windows-latest
@@ -63,4 +63,4 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python -c "import torch; print('torch', torch.__version__)"
-          python -m pytest tests/ -v --ignore=tests/sparse/test_jtj.py --ignore=tests/sparse/test_solve.py -k "not cuda"
+          python -m pytest tests/ -v --ignore=tests/sparse/test_jtj.py --ignore=tests/sparse/test_solve.py --ignore=tests/sparse/test_bsr.py -k "not cuda"

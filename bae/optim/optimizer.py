@@ -18,8 +18,13 @@ from ..sparse.py_ops import (
 )
 from ..exceptions import BAESolverError
 
-# CUDA extension required - no fallback
-from ..sparse.spgemm import CuSparse
+import os as _os
+_skip_ext = _os.environ.get("BAE_SKIP_EXTENSIONS", "0") in ("1", "true", "yes")
+
+if not _skip_ext:
+    from ..sparse.spgemm import CuSparse
+else:
+    CuSparse = None
 
 _logger = logging.getLogger(__name__)
 
