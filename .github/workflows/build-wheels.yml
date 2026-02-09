@@ -75,21 +75,25 @@ jobs:
         run: |
           echo "=== Before cleanup ==="
           df -h
-          # Remove CUDA samples and documentation
+          # Remove CUDA samples, documentation, and profiling tools
           rm -rf /usr/local/cuda/samples /usr/local/cuda/doc 2>/dev/null || true
-          # Remove CUDA nsight tools (very large)
           rm -rf /usr/local/cuda/nsight* /usr/local/cuda/NsightCompute* /usr/local/cuda/NsightSystems* 2>/dev/null || true
           rm -rf /usr/local/cuda/libnvvp /usr/local/cuda/nsightee_plugins 2>/dev/null || true
-          # Remove unnecessary CUDA libraries we don't use
+          rm -rf /usr/local/cuda/compute-sanitizer 2>/dev/null || true
+          rm -rf /usr/local/cuda/extras 2>/dev/null || true
+          rm -rf /usr/local/cuda/tools 2>/dev/null || true
+          # Remove unnecessary CUDA libraries we don't link against
           rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnvrtc* 2>/dev/null || true
           rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcurand* 2>/dev/null || true
           rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcufft* 2>/dev/null || true
           rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnpp* 2>/dev/null || true
-          # Clean apt cache
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcudnn* 2>/dev/null || true
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnvjpeg* 2>/dev/null || true
+          # Remove CUDA static libraries (we only need shared)
+          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/*_static*.a 2>/dev/null || true
+          # Clean apt cache and tmp
           apt-get clean || true
-          rm -rf /var/lib/apt/lists/* 2>/dev/null || true
-          # Clean tmp
-          rm -rf /tmp/* 2>/dev/null || true
+          rm -rf /var/lib/apt/lists/* /tmp/* 2>/dev/null || true
           echo "=== After cleanup ==="
           df -h
 
@@ -105,7 +109,7 @@ jobs:
           wget -q https://www.python.org/ftp/python/3.12.10/Python-3.12.10.tar.xz
           tar -xf Python-3.12.10.tar.xz
           cd Python-3.12.10
-          ./configure --prefix=/opt/python312 --enable-optimizations --with-ensurepip=install 2>&1 | tail -5
+          ./configure --prefix=/opt/python312 --with-ensurepip=install 2>&1 | tail -5
           make -j$(nproc) 2>&1 | tail -5
           make install 2>&1 | tail -5
           ln -sf /opt/python312/bin/python3.12 /usr/local/bin/python
@@ -157,7 +161,7 @@ jobs:
         run: |
           echo "=== Disk before build ==="
           df -h
-          pip wheel . --no-deps --no-build-isolation -w dist/
+          MAX_JOBS=2 pip wheel . --no-deps --no-build-isolation -w dist/
           echo "=== Disk after build ==="
           df -h
           # Clean build artifacts to free space
