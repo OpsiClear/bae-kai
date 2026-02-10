@@ -72,7 +72,7 @@ if not SKIP_EXTENSIONS:
 
     from torch.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 
 def _get_msvc_linker_path():
