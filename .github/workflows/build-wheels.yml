@@ -29,93 +29,70 @@ env:
 
 jobs:
   # ============================================
-  # Linux builds using NVIDIA CUDA images
+  # Linux builds (bare runner + CUDA apt packages)
   # ============================================
   build-linux:
     if: ${{ !inputs.skip_linux }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         include:
           # CUDA 12.4 builds (PyTorch 2.5.x compatibility)
           - cuda: '12.4'
-            cuda_full: '12.4.0'
+            cuda_version: '12.4.0'
             torch_index: 'https://download.pytorch.org/whl/cu124'
             arch_list: "7.0;7.5;8.0;8.6;8.9;9.0"
-          # Note: CUDA 12.6 Linux disabled - devel image too large for CI runner disk
-          # CUDA 12.8 builds - Blackwell support (sm_70/75/80 covered by cu12.4)
+          # CUDA 12.8 builds - Blackwell support
           - cuda: '12.8'
-            cuda_full: '12.8.0'
+            cuda_version: '12.8.0'
             torch_index: 'https://download.pytorch.org/whl/cu128'
-            arch_list: "8.6;8.9;9.0;12.0"
+            arch_list: "7.5;8.0;8.6;8.9;9.0;12.0"
           # CUDA 13.0 builds (PyTorch 2.9.x) - full sm_120 support
           - cuda: '13.0'
-            cuda_full: '13.0.0'
+            cuda_version: '13.0.0'
             torch_index: 'https://download.pytorch.org/whl/cu130'
-            # Full Blackwell support; older Maxwell/Pascal/Volta dropped in CUDA 13
             arch_list: "8.0;8.6;8.9;9.0;12.0"
-
-    container:
-      image: nvidia/cuda:${{ matrix.cuda_full }}-devel-ubuntu22.04
 
     env:
       TORCH_CUDA_ARCH_LIST: ${{ matrix.arch_list }}
 
     steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free disk space
-        run: |
-          echo "=== Before cleanup ==="
-          df -h
-          # Remove CUDA samples, documentation, and profiling tools
-          rm -rf /usr/local/cuda/samples /usr/local/cuda/doc 2>/dev/null || true
-          rm -rf /usr/local/cuda/nsight* /usr/local/cuda/NsightCompute* /usr/local/cuda/NsightSystems* 2>/dev/null || true
-          rm -rf /usr/local/cuda/libnvvp /usr/local/cuda/nsightee_plugins 2>/dev/null || true
-          rm -rf /usr/local/cuda/compute-sanitizer 2>/dev/null || true
-          rm -rf /usr/local/cuda/extras 2>/dev/null || true
-          rm -rf /usr/local/cuda/tools 2>/dev/null || true
-          # Remove unnecessary CUDA libraries we don't link against
-          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnvrtc* 2>/dev/null || true
-          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcurand* 2>/dev/null || true
-          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcufft* 2>/dev/null || true
-          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnpp* 2>/dev/null || true
-          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libcudnn* 2>/dev/null || true
-          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/libnvjpeg* 2>/dev/null || true
-          # Remove CUDA static libraries (we only need shared)
-          rm -rf /usr/local/cuda/targets/x86_64-linux/lib/*_static*.a 2>/dev/null || true
-          # Clean apt cache and tmp
-          apt-get clean || true
-          rm -rf /var/lib/apt/lists/* /tmp/* 2>/dev/null || true
-          echo "=== After cleanup ==="
-          df -h
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      - name: Install Python 3.12 and build dependencies
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.30
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: 'network'
+          # Linux network: sub-packages get "cuda-" prefix, non-cuda don't
+          sub-packages: '["nvcc", "cudart-dev", "thrust"]'
+          non-cuda-sub-packages: '["libcublas-dev", "libcusparse-dev", "libcusolver-dev", "libcufft-dev"]'
+
+      - name: Set CUDA environment
         run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            git build-essential wget xz-utils \
-            libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
-            libncurses5-dev libffi-dev liblzma-dev
-          # Build Python 3.12 from source
-          cd /tmp
-          wget -q https://www.python.org/ftp/python/3.12.10/Python-3.12.10.tar.xz
-          tar -xf Python-3.12.10.tar.xz
-          cd Python-3.12.10
-          ./configure --prefix=/opt/python312 --with-ensurepip=install 2>&1 | tail -5
-          make -j$(nproc) 2>&1 | tail -5
-          make install 2>&1 | tail -5
-          ln -sf /opt/python312/bin/python3.12 /usr/local/bin/python
-          ln -sf /opt/python312/bin/python3.12 /usr/local/bin/python3
-          ln -sf /opt/python312/bin/pip3.12 /usr/local/bin/pip
-          ln -sf /opt/python312/bin/pip3.12 /usr/local/bin/pip3
-          # Return to workspace before cleanup (cwd was /tmp/Python-3.12.10)
-          cd /
-          rm -rf /tmp/Python-3.12* 2>/dev/null || true
-          python --version
-          python -m pip install --upgrade pip setuptools wheel
+          echo "CUDA_HOME=$CUDA_PATH" >> $GITHUB_ENV
+          echo "$CUDA_PATH/bin" >> $GITHUB_PATH
+          echo "=== CUDA installed at ==="
+          echo "$CUDA_PATH"
+          nvcc --version
 
       - name: Download and install CUDSS
         run: |
@@ -123,19 +100,18 @@ jobs:
           cd /tmp
           wget -q https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-x86_64/libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz
           tar -xf libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz
-          cp -r libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive/* /opt/cudss/
-          # Clean up archive to save disk space
+          sudo cp -r libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive/* /opt/cudss/
           rm -rf /tmp/libcudss-* 2>/dev/null || true
           echo "CUDSS_DIR=/opt/cudss" >> $GITHUB_ENV
           ls -la /opt/cudss/lib/ || true
           df -h
 
-      - name: Install PyTorch
+      - name: Install build dependencies
         run: |
+          python -m pip install --upgrade pip setuptools wheel
           python -m pip install --no-cache-dir torch --index-url ${{ matrix.torch_index }}
           python -m pip install --no-cache-dir numpy scipy
           pip cache purge 2>/dev/null || true
-          df -h
 
       - name: Show environment info
         run: |
@@ -145,6 +121,8 @@ jobs:
           python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
           echo "=== NVCC ==="
           nvcc --version
+          echo "=== CUDA_HOME ==="
+          echo "$CUDA_HOME"
           echo "=== CUDSS ==="
           ls -la $CUDSS_DIR/lib/ 2>/dev/null || echo "CUDSS not found"
           echo "=== TORCH_CUDA_ARCH_LIST ==="
@@ -156,11 +134,9 @@ jobs:
         run: |
           echo "=== Disk before build ==="
           df -h
-          MAX_JOBS=1 pip wheel . --no-deps --no-build-isolation -w dist/
+          pip wheel . --no-deps --no-build-isolation -w dist/
           echo "=== Disk after build ==="
           df -h
-          # Clean build artifacts to free space
-          rm -rf build/ *.egg-info/ 2>/dev/null || true
 
       - name: Rename wheel with CUDA tag
         run: |
