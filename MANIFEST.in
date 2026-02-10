@@ -1,0 +1,2 @@
+include LICENSE LICENSE-AGPL README.md
+recursive-include bae *.cpp *.cu *.h
