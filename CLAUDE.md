@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `bae` (Bundle Adjustment in the Eager-mode) is a PyTorch library for 2nd-order sparse optimization, focused on Bundle Adjustment (BA) and Pose Graph Optimization (PGO). It uses custom CUDA kernels and sparse block matrix operations for large-scale computer vision problems.
 
-**Status**: Active development (v0.1), APIs are experimental.
+**Package name**: `bae-kai` (PyPI) / `import bae` (Python)
+**Status**: Active development (v0.1.2), APIs are experimental.
 
 ## Build Commands
 

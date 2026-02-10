@@ -3,11 +3,9 @@
 [![PyPI version](https://badge.fury.io/py/bae-kai.svg)](https://pypi.org/project/bae-kai/)
 [![License](https://img.shields.io/badge/License-Apache%202.0%20%2B%20AGPL%203.0-blue.svg)](LICENSE)
 
-> **⚠️ Development Phase Notice**: This library is currently in active development. APIs are subject to change and should be considered experimental. Use at your own discretion in production environments.
+> **⚠️ Development Phase Notice**: This library is in active development. APIs may change between releases.
 
-`bae-kai` is a fork of [bae](https://github.com/zitongzhan/bae) with full Windows support, pre-built CUDA wheels, and cuDSS bundling.
-
-`bae` is a PyTorch-based library supporting 2nd-order optimization techniques. The library provides efficient implementations for sparse optimization problems in robotics, particularly Bundle Adjustment (BA) and Pose Graph Optimization (PGO).
+`bae-kai` is a fork of [bae](https://github.com/zitongzhan/bae) with full Windows support, pre-built CUDA wheels, and cuDSS bundling. It provides PyTorch-based 2nd-order optimization for Bundle Adjustment (BA) and Pose Graph Optimization (PGO) using custom CUDA kernels and sparse block matrix operations.
 
 ## Features
 
@@ -94,57 +92,31 @@ uv sync
 - `USE_CUDSS`: `"1"` (default) to enable cuDSS support, `"0"` to disable
 - `CUDSS_DIR`: Path to cuDSS installation if not in standard locations
 
-## Example Usage
-
-### Bundle Adjustment
-
-Bundle Adjustment optimizes camera poses and 3D point positions to minimize reprojection error. The following example shows how to perform BA using `bae`:
+## Usage
 
 ```python
-import torch
-from datapipes.bal_loader import get_problem
-from ba_helpers import Reproj
 from bae.optim import LM
 
-# Load a problem from the BAL dataset
-dataset = get_problem("problem-49-7776-pre", "ladybug", use_quat=True)
-dataset = {k: v.to('cuda') for k, v in dataset.items() if isinstance(v, torch.Tensor)}
-
-# Prepare input for the optimization
-input = {
-    "points_2d": dataset['points_2d'],
-    "camera_indices": dataset['camera_index_of_observations'],
-    "point_indices": dataset['point_index_of_observations']
-}
-
-# Initialize model with camera parameters and 3D points
-model = Reproj(
-    dataset['camera_params'].clone(),
-    dataset['points_3d'].clone()
-).to('cuda')
-
-# Auto-selection: solver, strategy, and method are chosen automatically
+# model: a torch.nn.Module whose forward() returns residuals
 optimizer = LM(model, reject=30)
 
-# Run optimization for multiple iterations
 for idx in range(20):
     loss = optimizer.step(input)
     print(f'Iteration {idx}, loss: {loss.item()}')
 ```
 
-For more control, you can configure the optimizer explicitly:
+The optimizer auto-selects the solver, damping strategy, and method. For explicit control:
 
 ```python
-# String-based configuration
+# String-based
 optimizer = LM(model, solver="pcg", strategy="trustregion", method="schur")
 
-# Object-based configuration (backward-compatible)
-from bae.utils.pysolvers import PCG
-from bae.utils.schur import TrustRegion
+# Object-based
+from bae.utils import PCG, TrustRegion
 optimizer = LM(model, solver=PCG(tol=1e-4, maxiter=250), strategy=TrustRegion())
 ```
 
-See [`ba_example.py`](ba_example.py) for a complete working example.
+See [`ba_example.py`](ba_example.py) for a complete Bundle Adjustment example using the BAL dataset.
 
 ### API Overview
 
@@ -157,36 +129,15 @@ See [`ba_example.py`](ba_example.py) for a complete working example.
 
 ### Integration with VGGT
 
-`bae` is used as an optional Bundle Adjustment backend in [our VGGT fork](https://github.com/zitongzhan/vggt) (Visual Geometry Grounded Transformer) to refine the camera poses, intrinsics, and 3D points predicted by VGGT before exporting a COLMAP reconstruction.
-
-After installing `bae`, you can run VGGT's COLMAP export with BA enabled and `bae` selected as the solver:
+`bae-kai` can be used as a Bundle Adjustment backend in [VGGT](https://github.com/zitongzhan/vggt) (Visual Geometry Grounded Transformer) to refine camera poses, intrinsics, and 3D points before exporting a COLMAP reconstruction:
 
 ```bash
-python demo_colmap.py --scene_dir /path/to/scene --use_ba --implementation bae  # optional: --shared_camera
+python demo_colmap.py --scene_dir /path/to/scene --use_ba --implementation bae
 ```
-
-This command invokes `prepare_bae(...)` inside `vggt/demo_colmap.py`, which wraps VGGT tracks and predictions into `bae.optim.LM` and updates `extrinsic`, `intrinsic`, and `points_3d` in place before writing `scene_dir/sparse/` in COLMAP format.
-
-## Dataset Support
-
-The library supports common optimization datasets and tasks:
-
-- **Bundle Adjustment in the Large (BAL)** dataset
-- **1DSfM** dataset for large-scale structure from motion
-- **G2O** pose graph datasets
-
-## Performance
-
-`bae` is designed for high performance using:
-
-- Efficient sparse block matrix operations
-- CUDA acceleration for core operations
-- Optimized linear solvers (PCG, CUDA Sparse Solver)
-- Memory-efficient data structures
 
 ## Citation
 
-If you use `bae` in your research, please cite:
+If you use `bae-kai` in your research, please cite the original paper:
 
 ```bibtex
 @article{zhan2025bundle,
@@ -209,4 +160,4 @@ The implementation draws inspiration from:
 
 ## License
 
-This project is licensed under the [GNU Affero General Public License v3.0](LICENSE-AGPL).
+Original code by Zitong Zhan et al. is licensed under [Apache 2.0](LICENSE). Additions in this fork are licensed under [AGPL 3.0](LICENSE-AGPL).
