@@ -58,15 +58,19 @@ if sys.platform == 'win32':
 
 from setuptools import setup, find_packages
 
-# Monkey-patch to bypass CUDA version check (CUDA 13.0 is compatible with 12.8 builds)
-import torch.utils.cpp_extension as cpp_ext
-def _patched_check_cuda_version(compiler_name, compiler_version):
-    """Skip CUDA version check - CUDA 13.0 toolkit works with PyTorch cu128."""
-    pass  # Do nothing - skip the version check entirely
-cpp_ext._check_cuda_version = _patched_check_cuda_version
-print("[setup.py] Patched _check_cuda_version to skip CUDA version check")
+# Check if we should skip CUDA extensions (for sdist builds without CUDA)
+SKIP_EXTENSIONS = os.environ.get("BAE_SKIP_EXTENSIONS", "0").lower() in ("1", "true", "yes", "y")
 
-from torch.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension
+if not SKIP_EXTENSIONS:
+    # Monkey-patch to bypass CUDA version check (CUDA 13.0 is compatible with 12.8 builds)
+    import torch.utils.cpp_extension as cpp_ext
+    def _patched_check_cuda_version(compiler_name, compiler_version):
+        """Skip CUDA version check - CUDA 13.0 toolkit works with PyTorch cu128."""
+        pass  # Do nothing - skip the version check entirely
+    cpp_ext._check_cuda_version = _patched_check_cuda_version
+    print("[setup.py] Patched _check_cuda_version to skip CUDA version check")
+
+    from torch.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension
 
 VERSION = "0.1.1"
 
@@ -289,54 +293,46 @@ def _collect_libs():
     return libs
 
 
-class BuildExtensionWithDLLBundle(BuildExtension):
-    """Custom BuildExtension that bundles CUDA shared libraries."""
+if not SKIP_EXTENSIONS:
+    class BuildExtensionWithDLLBundle(BuildExtension):
+        """Custom BuildExtension that bundles CUDA shared libraries."""
 
-    def run(self):
-        # Run the normal build first
-        super().run()
+        def run(self):
+            super().run()
+            if BUNDLE_DLLS:
+                self._bundle_libs()
 
-        # Bundle shared libraries if requested
-        if BUNDLE_DLLS:
-            self._bundle_libs()
+        def _bundle_libs(self):
+            """Copy required shared libraries to the package directory."""
+            libs = _collect_libs()
+            if not libs:
+                print("[setup.py] No libraries to bundle")
+                return
 
-    def _bundle_libs(self):
-        """Copy required shared libraries to the package directory."""
-        libs = _collect_libs()
-        if not libs:
-            print("[setup.py] No libraries to bundle")
-            return
+            build_lib = self.build_lib
+            lib_dest = os.path.join(build_lib, 'bae', 'libs')
+            os.makedirs(lib_dest, exist_ok=True)
 
-        # Determine output directory
-        build_lib = self.build_lib
-        lib_dest = os.path.join(build_lib, 'bae', 'libs')
+            bundled = []
+            for lib_path in libs:
+                lib_name = os.path.basename(lib_path)
+                dest_path = os.path.join(lib_dest, lib_name)
 
-        os.makedirs(lib_dest, exist_ok=True)
-
-        bundled = []
-        for lib_path in libs:
-            lib_name = os.path.basename(lib_path)
-            dest_path = os.path.join(lib_dest, lib_name)
-
-            # Handle symlinks on Linux
-            if os.path.islink(lib_path):
-                # Copy the actual file, not the symlink
-                real_path = os.path.realpath(lib_path)
-                if os.path.exists(real_path) and not os.path.exists(dest_path):
-                    shutil.copy2(real_path, dest_path)
+                if os.path.islink(lib_path):
+                    real_path = os.path.realpath(lib_path)
+                    if os.path.exists(real_path) and not os.path.exists(dest_path):
+                        shutil.copy2(real_path, dest_path)
+                        bundled.append(lib_name)
+                elif not os.path.exists(dest_path):
+                    shutil.copy2(lib_path, dest_path)
                     bundled.append(lib_name)
-            elif not os.path.exists(dest_path):
-                shutil.copy2(lib_path, dest_path)
-                bundled.append(lib_name)
 
-        if bundled:
-            print(f"[setup.py] Bundled {len(bundled)} libraries to {lib_dest}")
-
-            # Create __init__.py in libs directory to make it a package
-            init_path = os.path.join(lib_dest, '__init__.py')
-            if not os.path.exists(init_path):
-                with open(init_path, 'w') as f:
-                    f.write('# Directory for bundled CUDA libraries\n')
+            if bundled:
+                print(f"[setup.py] Bundled {len(bundled)} libraries to {lib_dest}")
+                init_path = os.path.join(lib_dest, '__init__.py')
+                if not os.path.exists(init_path):
+                    with open(init_path, 'w') as f:
+                        f.write('# Directory for bundled CUDA libraries\n')
 
 def readme():
     """Read the README.md file for long description"""
@@ -360,104 +356,104 @@ else:
     CUDSS_DIR = os.environ.get("CUDSS_DIR", "")
 
 if __name__ == '__main__':
-    # Common extensions
-    # Extra compile args to fix CUDA 12.8 + PyTorch cu128 namespace collision
-    # PyTorch's compiled_autograd.h has a known Windows+CUDA compilation issue
-    # (see https://github.com/pytorch/pytorch/pull/144707)
-    # The workaround requires USE_CUDA to be defined to skip problematic code
-    cuda_extra_compile_args = {
-        'cxx': ['/DUSE_CUDA'] if sys.platform == 'win32' else ['-DUSE_CUDA'],
-        'nvcc': [
-            '-DUSE_CUDA',  # Required to trigger PyTorch's Windows+CUDA workaround
-        ]
-    }
+    ext_modules = []
+    cmdclass = {}
 
-    ext_modules = [
-        CppExtension(
-            'bae.sparse.bsr',
-            [os.path.join('bae', 'sparse', 'sparse_op_cpp.cpp')]
-        ),
-        CUDAExtension(
-            'bae.sparse.bsr_cuda',
-            [
-                os.path.join('bae', 'sparse', 'sparse_op_cuda.cpp'),
-                os.path.join('bae', 'sparse', 'sparse_op_cuda_kernel.cu')
-            ],
-            extra_compile_args=cuda_extra_compile_args,
-        ),
-        CUDAExtension(
-            'bae.sparse.spgemm',
-            [os.path.join('bae', 'sparse', 'cusparse_wrapper.cpp')],
-            libraries=['cusparse'],
-        ),
-        CUDAExtension(
-            'bae.sparse.conversion',
-            [os.path.join('bae', 'sparse', 'sparse_conversion.cu')],
-            extra_compile_args=cuda_extra_compile_args,
-            libraries=['cusparse'],
-        ),
-    ]
-    
-    # Add CUDSS-dependent extension conditionally
-    if USE_CUDSS:
-        libraries = ['cusolver', 'cusparse', 'cudss']
-        cudss_extra_compile_args = {
-            'cxx': ['/DUSE_CUDA'] if sys.platform == 'win32' else [],
+    if SKIP_EXTENSIONS:
+        print("[setup.py] BAE_SKIP_EXTENSIONS=1: skipping CUDA extensions")
+    else:
+        # Common extensions
+        # Extra compile args to fix CUDA 12.8 + PyTorch cu128 namespace collision
+        cuda_extra_compile_args = {
+            'cxx': ['/DUSE_CUDA'] if sys.platform == 'win32' else ['-DUSE_CUDA'],
             'nvcc': [
                 '-DUSE_CUDA',
-                '-lcusolver',
-                '-lcusparse',
-                '-lcudss',
             ]
         }
 
-        # Platform-specific paths
-        if sys.platform == 'win32':
-            # Windows: CUDSS_DIR must be set
-            if CUDSS_DIR:
-                # CUDSS redistributable has lib/ directly, installed version has lib/12
-                # Check both locations
-                cudss_include = [os.path.join(CUDSS_DIR, 'include')]
-                if os.path.exists(os.path.join(CUDSS_DIR, 'lib', '12')):
-                    cudss_libdir = [os.path.join(CUDSS_DIR, 'lib', '12')]
-                    lib_path = f'{CUDSS_DIR}\\lib\\12'
-                elif os.path.exists(os.path.join(CUDSS_DIR, 'lib', 'x64')):
-                    cudss_libdir = [os.path.join(CUDSS_DIR, 'lib', 'x64')]
-                    lib_path = f'{CUDSS_DIR}\\lib\\x64'
-                else:
-                    cudss_libdir = [os.path.join(CUDSS_DIR, 'lib')]
-                    lib_path = f'{CUDSS_DIR}\\lib'
-                cudss_extra_compile_args['nvcc'].extend([
-                    f'-I{CUDSS_DIR}\\include',
-                    f'-L{lib_path}',
-                ])
-            else:
-                print("[setup.py] WARNING: CUDSS_DIR not set. Set CUDSS_DIR environment variable to CUDSS installation path.")
-                cudss_include = []
-                cudss_libdir = []
-        else:
-            # Linux: use default paths or CUDSS_DIR
-            if CUDSS_DIR:
-                cudss_include = [os.path.join(CUDSS_DIR, 'include')]
-                cudss_libdir = [os.path.join(CUDSS_DIR, 'lib')]
-                cudss_extra_compile_args['nvcc'].extend([
-                    f'-I{CUDSS_DIR}/include',
-                    f'-L{CUDSS_DIR}/lib',
-                ])
-            else:
-                cudss_include = ['/usr/include/libcudss/12/']
-                cudss_libdir = ['/usr/lib/x86_64-linux-gnu/libcudss/12/']
-
-        ext_modules.append(
+        ext_modules = [
+            CppExtension(
+                'bae.sparse.bsr',
+                [os.path.join('bae', 'sparse', 'sparse_op_cpp.cpp')]
+            ),
             CUDAExtension(
-                'bae.sparse.solve',
-                [os.path.join('bae', 'sparse', 'sparse_cusolve.cu')],
-                libraries=libraries,
-                extra_compile_args=cudss_extra_compile_args,
-                include_dirs=cudss_include,
-                library_dirs=cudss_libdir
+                'bae.sparse.bsr_cuda',
+                [
+                    os.path.join('bae', 'sparse', 'sparse_op_cuda.cpp'),
+                    os.path.join('bae', 'sparse', 'sparse_op_cuda_kernel.cu')
+                ],
+                extra_compile_args=cuda_extra_compile_args,
+            ),
+            CUDAExtension(
+                'bae.sparse.spgemm',
+                [os.path.join('bae', 'sparse', 'cusparse_wrapper.cpp')],
+                libraries=['cusparse'],
+            ),
+            CUDAExtension(
+                'bae.sparse.conversion',
+                [os.path.join('bae', 'sparse', 'sparse_conversion.cu')],
+                extra_compile_args=cuda_extra_compile_args,
+                libraries=['cusparse'],
+            ),
+        ]
+        cmdclass = {'build_ext': BuildExtensionWithDLLBundle}
+
+        # Add CUDSS-dependent extension conditionally
+        if USE_CUDSS:
+            libraries = ['cusolver', 'cusparse', 'cudss']
+            cudss_extra_compile_args = {
+                'cxx': ['/DUSE_CUDA'] if sys.platform == 'win32' else [],
+                'nvcc': [
+                    '-DUSE_CUDA',
+                    '-lcusolver',
+                    '-lcusparse',
+                    '-lcudss',
+                ]
+            }
+
+            # Platform-specific paths
+            if sys.platform == 'win32':
+                if CUDSS_DIR:
+                    cudss_include = [os.path.join(CUDSS_DIR, 'include')]
+                    if os.path.exists(os.path.join(CUDSS_DIR, 'lib', '12')):
+                        cudss_libdir = [os.path.join(CUDSS_DIR, 'lib', '12')]
+                        lib_path = f'{CUDSS_DIR}\\lib\\12'
+                    elif os.path.exists(os.path.join(CUDSS_DIR, 'lib', 'x64')):
+                        cudss_libdir = [os.path.join(CUDSS_DIR, 'lib', 'x64')]
+                        lib_path = f'{CUDSS_DIR}\\lib\\x64'
+                    else:
+                        cudss_libdir = [os.path.join(CUDSS_DIR, 'lib')]
+                        lib_path = f'{CUDSS_DIR}\\lib'
+                    cudss_extra_compile_args['nvcc'].extend([
+                        f'-I{CUDSS_DIR}\\include',
+                        f'-L{lib_path}',
+                    ])
+                else:
+                    print("[setup.py] WARNING: CUDSS_DIR not set.")
+                    cudss_include = []
+                    cudss_libdir = []
+            else:
+                if CUDSS_DIR:
+                    cudss_include = [os.path.join(CUDSS_DIR, 'include')]
+                    cudss_libdir = [os.path.join(CUDSS_DIR, 'lib')]
+                    cudss_extra_compile_args['nvcc'].extend([
+                        f'-I{CUDSS_DIR}/include',
+                        f'-L{CUDSS_DIR}/lib',
+                    ])
+                else:
+                    cudss_include = ['/usr/include/libcudss/12/']
+                    cudss_libdir = ['/usr/lib/x86_64-linux-gnu/libcudss/12/']
+
+            ext_modules.append(
+                CUDAExtension(
+                    'bae.sparse.solve',
+                    [os.path.join('bae', 'sparse', 'sparse_cusolve.cu')],
+                    libraries=libraries,
+                    extra_compile_args=cudss_extra_compile_args,
+                    include_dirs=cudss_include,
+                    library_dirs=cudss_libdir
+                )
             )
-        )
 
     setup(
         name = 'bae',
@@ -470,8 +466,8 @@ if __name__ == '__main__':
             'torch',
             'warp-lang',
         ],
-        packages=find_packages(exclude=['./ba_example.py', 
-                                        './setup.py', 
+        packages=find_packages(exclude=['./ba_example.py',
+                                        './setup.py',
                                         './README.md',
                                         './data',
                                         './1dsfm_bal',
@@ -481,7 +477,7 @@ if __name__ == '__main__':
                                         './examples',
                                         './tests',]),
         ext_modules=ext_modules,
-        cmdclass={'build_ext': BuildExtensionWithDLLBundle},
+        cmdclass=cmdclass,
         package_data={
             'bae': ['libs/*.dll', 'libs/*.so*'] if BUNDLE_DLLS else [],
         },
