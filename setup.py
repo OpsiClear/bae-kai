@@ -456,7 +456,7 @@ if __name__ == '__main__':
             )
 
     setup(
-        name = 'bae',
+        name = 'bae-kai',
         version = VERSION,
         description = 'PyTorch implementation of BA',
         long_description = readme(),

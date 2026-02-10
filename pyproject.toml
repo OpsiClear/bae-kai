@@ -1,5 +1,5 @@
 [project]
-name = "bae"
+name = "bae-kai"
 version = "0.1.1"
 description = "PyTorch implementation of Bundle Adjustment in the Eager-mode"
 readme = "README.md"
