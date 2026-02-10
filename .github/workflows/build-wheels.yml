@@ -142,7 +142,7 @@ jobs:
         run: |
           cd dist
           for f in *.whl; do
-            newname=$(echo "$f" | sed "s/\(bae-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
+            newname=$(echo "$f" | sed "s/\(bae_kai-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
             mv "$f" "$newname"
           done
           ls -la
@@ -261,7 +261,7 @@ jobs:
         run: |
           cd dist
           for f in *.whl; do
-            newname=$(echo "$f" | sed "s/\(bae-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
+            newname=$(echo "$f" | sed "s/\(bae_kai-[0-9.]*\)/\1+cu${{ matrix.cuda }}/")
             mv "$f" "$newname"
           done
           ls -la
