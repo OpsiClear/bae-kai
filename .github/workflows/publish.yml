@@ -25,48 +25,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version || github.event.release.tag_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Get version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Download wheels from latest Build Wheels run
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p dist
-
-          # Get the latest successful Build Wheels run
-          RUN_ID=$(gh run list --workflow=build-wheels.yml --status=success --limit=1 --json databaseId --jq '.[0].databaseId')
-
-          if [ -z "$RUN_ID" ]; then
-            echo "No successful Build Wheels run found"
-            exit 1
-          fi
-
-          echo "Downloading artifacts from run $RUN_ID"
-          gh run download $RUN_ID -D artifacts/
-
-          # Move all wheels to dist/
-          find artifacts -name "*.whl" -exec mv {} dist/ \;
-
-          echo "Downloaded wheels:"
-          ls -la dist/
-
       - name: Build source distribution
         run: |
           pip install build
           BAE_SKIP_EXTENSIONS=1 python -m build --sdist
+          echo "=== Built distributions ==="
           ls -la dist/
 
       - name: Publish to PyPI
