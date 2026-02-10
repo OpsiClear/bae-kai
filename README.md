@@ -9,11 +9,6 @@
 
 `bae` is a PyTorch-based library supporting 2nd-order optimization techniques. The library provides efficient implementations for sparse optimization problems in robotics, particularly Bundle Adjustment (BA) and Pose Graph Optimization (PGO).
 
-## News
-
-- 2026-02-06: Windows CUDA wheels now available on PyPI
-- 2025-12-12: Added a VGGT integration example.
-
 ## Features
 
 - **Sparse Block Matrix Operations**: Optimized implementations of sparse matrix operations for large-scale optimization
@@ -23,55 +18,80 @@
 - **PyTorch Integration**: Seamlessly integrates with PyTorch's automatic differentiation framework
 - **Levenberg-Marquardt Optimizer**: Custom implementation of the LM algorithm for non-linear least squares problems
 
-### Future Plan
-- [ ] An new backend for [distributed solver](https://github.com/NVIDIA/AMGX)  
-
 ## Installation
 
-### Quick Install (Recommended)
+### Prerequisites
 
-Pre-built wheels with CUDA extensions are available on PyPI:
+- Python 3.12+
+- PyTorch 2.0+ **with CUDA** (CPU-only PyTorch will not work)
+- NVIDIA GPU with CUDA support
+- CUDA Toolkit installed (for building from source)
+
+### Step 1: Install PyTorch with CUDA
+
+You must install a CUDA-enabled PyTorch **before** installing `bae-kai`. The CUDA version of PyTorch is not the default on PyPI, so you need to specify the index URL:
 
 ```bash
-# Install with CUDA 12.8 (for RTX 30/40/50 series)
-uv pip install torch --index-url https://download.pytorch.org/whl/cu128
-uv pip install bae-kai
+# CUDA 12.8 (recommended for RTX 30/40/50 series)
+pip install torch --index-url https://download.pytorch.org/whl/cu128
 
-# Or with CUDA 13.0 (latest)
-uv pip install torch --index-url https://download.pytorch.org/whl/cu130
-uv pip install bae-kai
+# Or CUDA 12.4
+pip install torch --index-url https://download.pytorch.org/whl/cu124
 ```
 
-### Available Wheels
+Verify your PyTorch has CUDA:
+
+```bash
+python -c "import torch; print(torch.version.cuda)"
+# Should print something like "12.8", NOT "None"
+```
+
+### Step 2: Install bae-kai
+
+`bae-kai` is distributed as a source package on PyPI. It compiles CUDA extensions during installation, which requires the CUDA Toolkit to be installed on your system.
+
+```bash
+pip install bae-kai --no-build-isolation
+```
+
+`--no-build-isolation` is required so the build can use your installed CUDA-enabled PyTorch.
+
+**Windows**: The CUDA Toolkit is usually installed at `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\vX.Y` and is detected automatically.
+
+**Linux**: Set `CUDA_HOME` if the toolkit is not at `/usr/local/cuda`:
+
+```bash
+CUDA_HOME=/usr/local/cuda-12.8 pip install bae-kai --no-build-isolation
+```
+
+### Pre-built Wheels
+
+Pre-built wheels with bundled CUDA libraries are available as [GitHub Actions artifacts](https://github.com/OpsiClear/bae-kai/actions/workflows/build-wheels.yml) (no CUDA Toolkit needed to install):
 
 | Platform | CUDA | Architectures |
 |----------|------|---------------|
 | Linux | 12.4, 12.8, 13.0 | sm_70 - sm_120 |
 | Windows | 12.4, 12.6, 12.8 | sm_70 - sm_120 |
 
-### From Source
-
-For development or custom builds:
+To install a pre-built wheel, download the `.whl` file for your platform and CUDA version from the latest successful workflow run, then:
 
 ```bash
-# Clone this repository
+pip install bae-0.1.2+cu12.8-cp312-cp312-win_amd64.whl
+```
+
+### From Source (Development)
+
+```bash
 git clone https://github.com/OpsiClear/bae-kai.git
 cd bae-kai
-
-# Install PyPose from the bae branch
-uv pip install git+https://github.com/pypose/pypose.git@bae
-
-# Install in development mode (uv sync handles all dependencies)
 uv sync
 ```
 
 ### Build Options
 
-Control the build with environment variables:
-
-- `BAE_BUILD_EXTENSIONS=1`: Force building CUDA extensions (required on Windows)
-- `BAE_SKIP_EXTENSIONS=1`: Skip CUDA extensions (Python fallbacks not available)
-- `USE_CUDSS`: Set to "1" (default) to enable cuDSS support, "0" to disable
+- `CUDA_HOME` / `CUDA_PATH`: Path to CUDA Toolkit (auto-detected on Windows)
+- `BAE_SKIP_EXTENSIONS=1`: Skip CUDA extensions entirely (for sdist builds only)
+- `USE_CUDSS`: `"1"` (default) to enable cuDSS support, `"0"` to disable
 - `CUDSS_DIR`: Path to cuDSS installation if not in standard locations
 
 ## Example Usage
